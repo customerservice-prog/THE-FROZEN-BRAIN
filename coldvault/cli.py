@@ -21,6 +21,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("conversations")
     sub.add_parser("projects")
     sub.add_parser("beliefs")
+    sub.add_parser("reminders")
+
+    remind = sub.add_parser("remind")
+    remind.add_argument("content")
+    remind.add_argument("--due", required=True, help="ISO-8601 timestamp; naive values are treated as UTC")
+    remind.add_argument("--source", default="user")
+
+    reminder_done = sub.add_parser("reminder-done")
+    reminder_done.add_argument("id")
+
+    reminder_cancel = sub.add_parser("reminder-cancel")
+    reminder_cancel.add_argument("id")
 
     belief_add = sub.add_parser("belief-add")
     belief_add.add_argument("claim")
@@ -146,6 +158,16 @@ def main() -> None:
         print_json(vault.projects.list())
     elif args.cmd == "beliefs":
         print_json([b.as_dict() for b in vault.beliefs.search("", limit=50)])
+    elif args.cmd == "reminders":
+        print_json(vault.prospective.list("pending", limit=100))
+    elif args.cmd == "remind":
+        print(vault.prospective.create(args.content, args.due, source=args.source))
+    elif args.cmd == "reminder-done":
+        vault.prospective.set_status(args.id, "done")
+        print_json({"ok": True, "id": args.id, "status": "done"})
+    elif args.cmd == "reminder-cancel":
+        vault.prospective.set_status(args.id, "cancelled")
+        print_json({"ok": True, "id": args.id, "status": "cancelled"})
     elif args.cmd == "belief-add":
         print(vault.beliefs.create(
             args.claim, classification=args.classification,
