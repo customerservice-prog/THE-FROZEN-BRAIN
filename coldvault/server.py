@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import signal
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -188,6 +189,16 @@ def serve(vault: ColdVault, host: str = "127.0.0.1", port: int = 7777) -> None:
     Handler.vault = vault
     Handler.web_root = vault.repo_root / "web"
     server = ThreadingHTTPServer((host, port), Handler)
+
+    previous_sigterm = None
+    if hasattr(signal, "SIGTERM"):
+        previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def _checkpoint_signal(signum, frame):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, _checkpoint_signal)
+
     print(f"ColdVault UI: http://{host}:{port}")
     print("Core services are local. Model traffic goes only to the configured local/LAN provider endpoint by default.")
     try:
@@ -197,3 +208,5 @@ def serve(vault: ColdVault, host: str = "127.0.0.1", port: int = 7777) -> None:
     finally:
         vault.checkpoint("server-shutdown")
         server.server_close()
+        if previous_sigterm is not None:
+            signal.signal(signal.SIGTERM, previous_sigterm)
