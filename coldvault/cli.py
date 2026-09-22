@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .archive import build_manifest, verify_manifest
+from .ark import build_ark_catalog, verify_ark
 from .core import ColdVault
 from .portability import export_memories, import_memories
 from .server import serve
@@ -133,6 +134,16 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("root")
     manifest.add_argument("--output", default="COLDVAULT-MANIFEST.json")
 
+    ark_build = sub.add_parser("ark-build")
+    ark_build.add_argument("root")
+    ark_build.add_argument("--manifest", default="COLDVAULT-ARK.json")
+    ark_build.add_argument("--index", default="COLDVAULT-INDEX.md")
+
+    ark_verify = sub.add_parser("ark-verify")
+    ark_verify.add_argument("root")
+    ark_verify.add_argument("--manifest", default="COLDVAULT-ARK.json")
+    ark_verify.add_argument("--strict", action="store_true")
+
     verify = sub.add_parser("archive-verify")
     verify.add_argument("root")
     verify.add_argument("manifest")
@@ -250,6 +261,22 @@ def main() -> None:
         if not output.is_absolute():
             output = root / output
         print_json(build_manifest(root, output))
+    elif args.cmd == "ark-build":
+        root = Path(args.root).resolve()
+        manifest_path = Path(args.manifest)
+        index_path = Path(args.index)
+        if not manifest_path.is_absolute():
+            manifest_path = root / manifest_path
+        if not index_path.is_absolute():
+            index_path = root / index_path
+        print_json(build_ark_catalog(root, manifest_path, index_path))
+    elif args.cmd == "ark-verify":
+        root = Path(args.root).resolve()
+        manifest_path = Path(args.manifest)
+        if not manifest_path.is_absolute():
+            manifest_path = root / manifest_path
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        print_json(verify_ark(root, manifest, strict=args.strict))
     elif args.cmd == "archive-verify":
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
         print_json(verify_manifest(Path(args.root), manifest))
