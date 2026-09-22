@@ -56,6 +56,12 @@ class ColdVault:
         config = profile.as_config().validate_privacy()
         return profile, OpenAICompatibleProvider(config)
 
+    def _provider_candidates(self, route: str) -> list[tuple[object, OpenAICompatibleProvider]]:
+        return [
+            (profile, OpenAICompatibleProvider(profile.as_config().validate_privacy()))
+            for profile in self.models.candidates(route)
+        ]
+
     def status(self) -> dict:
         profile, provider = self._provider_for_route("general")
         return {
@@ -141,76 +147,53 @@ Rules:
         self.conversations.append(conversation_id, "user", text)
         self.db.add_event("chat.user", {"text": text, "conversation_id": conversation_id})
         route = classify_request(text)
-        profile, provider = self._provider_for_route(route)
-        messages, knowledge = self.build_messages(text, conversation_id, route, profile.name)
-        try:
-            answer = provider.chat(messages)
-            ok = True
-        except ProviderError as exc:
+
+        failures = []
+        answer = ""
+        selected_profile = None
+        selected_model = None
+        knowledge = []
+        ok = False
+        for profile, provider in self._provider_candidates(route):
+            messages, candidate_knowledge = self.build_messages(text, conversation_id, route, profile.name)
+            try:
+                answer = provider.chat(messages)
+                selected_profile = profile
+                selected_model = profile.model
+                knowledge = candidate_knowledge
+                ok = True
+                if failures:
+                    self.db.add_event(
+                        "model.failover",
+                        {
+                            "conversation_id": conversation_id,
+                            "route": route,
+                            "selected_profile": profile.name,
+                            "failed_profiles": [item["profile"] for item in failures],
+                        },
+                    )
+                break
+            except ProviderError as exc:
+                failures.append({
+                    "profile": profile.name,
+                    "model": profile.model,
+                    "endpoint": profile.base_url,
+                    "error": str(exc),
+                })
+
+        if not ok:
             answer = (
-                "The ColdVault continuity core is running, but the selected local model did not answer. "
-                f"Profile: {profile.name}; model: {profile.model}; endpoint: {profile.base_url}. "
-                f"Provider error: {exc}"
+                "The ColdVault continuity core is running, but no configured local/LAN model answered. "
+                "No cloud fallback was attempted. Failures: "
+                + "; ".join(f"{item['profile']}@{item['endpoint']}: {item['error']}" for item in failures)
             )
-            ok = False
-        metadata = json.dumps({"route": route, "profile": profile.name, "provider_ok": ok}, sort_keys=True)
-        self.conversations.append(conversation_id, "assistant", answer, metadata)
-        self.db.add_event(
-            "chat.assistant",
-            {"text": answer, "provider_ok": ok, "conversation_id": conversation_id, "route": route, "profile": profile.name},
+
+        profile_name = selected_profile.name if selected_profile else "none"
+        model_name = selected_model or "none"
+        metadata = json.dumps(
+            {"route": route, "profile": profile_name, "provider_ok": ok, "failures": failures},
+            sort_keys=True,
         )
-        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
-        return {
-            "ok": ok,
-            "answer": answer,
-            "route": route,
-            "profile": profile.name,
-            "model": profile.model,
-            "conversation_id": conversation_id,
-            "sources": sources,
-        }
-
-    def chat_stream(self, user_text: str, conversation_id: str = "default"):
-        """Yield structured streaming events while preserving the final assistant message durably."""
-        text = user_text.strip()
-        if not text:
-            raise ValueError("message cannot be empty")
-        conversation_id = self.conversations.ensure(conversation_id)
-        self.conversations.append(conversation_id, "user", text)
-        self.db.add_event("chat.user", {"text": text, "conversation_id": conversation_id, "stream": True})
-        route = classify_request(text)
-        profile, provider = self._provider_for_route(route)
-        messages, knowledge = self.build_messages(text, conversation_id, route, profile.name)
-        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
-
-        yield {
-            "type": "meta",
-            "route": route,
-            "profile": profile.name,
-            "model": profile.model,
-            "conversation_id": conversation_id,
-            "sources": sources,
-        }
-
-        parts: list[str] = []
-        ok = True
-        try:
-            for chunk in provider.stream_chat(messages):
-                parts.append(chunk)
-                yield {"type": "delta", "text": chunk}
-            answer = "".join(parts).strip()
-            if not answer:
-                raise ProviderError("local model stream ended without text")
-        except ProviderError as exc:
-            ok = False
-            answer = (
-                "The ColdVault continuity core is running, but the selected local model stream did not complete. "
-                f"Profile: {profile.name}; model: {profile.model}; endpoint: {profile.base_url}. "
-                f"Provider error: {exc}"
-            )
-            yield {"type": "error", "text": answer}
-
-        metadata = json.dumps({"route": route, "profile": profile.name, "provider_ok": ok, "stream": True}, sort_keys=True)
         self.conversations.append(conversation_id, "assistant", answer, metadata)
         self.db.add_event(
             "chat.assistant",
@@ -219,8 +202,131 @@ Rules:
                 "provider_ok": ok,
                 "conversation_id": conversation_id,
                 "route": route,
-                "profile": profile.name,
+                "profile": profile_name,
+                "failures": failures,
+            },
+        )
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+        return {
+            "ok": ok,
+            "answer": answer,
+            "route": route,
+            "profile": profile_name,
+            "model": model_name,
+            "conversation_id": conversation_id,
+            "sources": sources,
+            "failures": failures,
+        }
+
+    def chat_stream(self, user_text: str, conversation_id: str = "default"):
+        """Yield structured streaming events with pre-stream local/LAN failover."""
+        text = user_text.strip()
+        if not text:
+            raise ValueError("message cannot be empty")
+        conversation_id = self.conversations.ensure(conversation_id)
+        self.conversations.append(conversation_id, "user", text)
+        self.db.add_event("chat.user", {"text": text, "conversation_id": conversation_id, "stream": True})
+        route = classify_request(text)
+
+        failures = []
+        chosen = None
+        first_chunk = None
+        iterator = None
+        knowledge = []
+
+        for profile, provider in self._provider_candidates(route):
+            messages, candidate_knowledge = self.build_messages(text, conversation_id, route, profile.name)
+            try:
+                candidate = provider.stream_chat(messages)
+                first_chunk = next(candidate)
+                chosen = profile
+                iterator = candidate
+                knowledge = candidate_knowledge
+                if failures:
+                    self.db.add_event(
+                        "model.failover",
+                        {
+                            "conversation_id": conversation_id,
+                            "route": route,
+                            "selected_profile": profile.name,
+                            "failed_profiles": [item["profile"] for item in failures],
+                            "stream": True,
+                        },
+                    )
+                break
+            except (ProviderError, StopIteration) as exc:
+                failures.append({
+                    "profile": profile.name,
+                    "model": profile.model,
+                    "endpoint": profile.base_url,
+                    "error": str(exc) or "stream ended without text",
+                })
+
+        if chosen is None or iterator is None or first_chunk is None:
+            answer = (
+                "The ColdVault continuity core is running, but no configured local/LAN model stream answered. "
+                "No cloud fallback was attempted. Failures: "
+                + "; ".join(f"{item['profile']}@{item['endpoint']}: {item['error']}" for item in failures)
+            )
+            self.conversations.append(
+                conversation_id,
+                "assistant",
+                answer,
+                json.dumps({"route": route, "profile": "none", "provider_ok": False, "stream": True, "failures": failures}, sort_keys=True),
+            )
+            self.db.add_event("chat.assistant", {"text": answer, "provider_ok": False, "conversation_id": conversation_id, "route": route, "profile": "none", "stream": True, "failures": failures})
+            yield {"type": "error", "text": answer, "failures": failures}
+            yield {"type": "done", "ok": False, "answer": answer, "route": route, "profile": "none", "model": "none", "conversation_id": conversation_id, "sources": [], "failures": failures}
+            return
+
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+        yield {
+            "type": "meta",
+            "route": route,
+            "profile": chosen.name,
+            "model": chosen.model,
+            "conversation_id": conversation_id,
+            "sources": sources,
+            "failovers": failures,
+        }
+
+        parts = [first_chunk]
+        yield {"type": "delta", "text": first_chunk}
+        ok = True
+        stream_error = None
+        try:
+            for chunk in iterator:
+                parts.append(chunk)
+                yield {"type": "delta", "text": chunk}
+        except ProviderError as exc:
+            ok = False
+            stream_error = str(exc)
+            yield {"type": "error", "text": f"Local model stream interrupted after output began: {exc}"}
+
+        answer = "".join(parts).strip()
+        metadata = json.dumps(
+            {
+                "route": route,
+                "profile": chosen.name,
+                "provider_ok": ok,
                 "stream": True,
+                "failovers": failures,
+                "stream_error": stream_error,
+            },
+            sort_keys=True,
+        )
+        self.conversations.append(conversation_id, "assistant", answer, metadata)
+        self.db.add_event(
+            "chat.assistant",
+            {
+                "text": answer,
+                "provider_ok": ok,
+                "conversation_id": conversation_id,
+                "route": route,
+                "profile": chosen.name,
+                "stream": True,
+                "failovers": failures,
+                "stream_error": stream_error,
             },
         )
         yield {
@@ -228,10 +334,12 @@ Rules:
             "ok": ok,
             "answer": answer,
             "route": route,
-            "profile": profile.name,
-            "model": profile.model,
+            "profile": chosen.name,
+            "model": chosen.model,
             "conversation_id": conversation_id,
             "sources": sources,
+            "failures": failures,
+            "stream_error": stream_error,
         }
 
     def deep_think(self, user_text: str, conversation_id: str = "default", attempts: int = 2) -> dict:
