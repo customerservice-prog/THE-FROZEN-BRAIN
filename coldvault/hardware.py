@@ -27,9 +27,10 @@ class HardwareProfile:
 def _memory_bytes() -> int | None:
     if os.path.exists("/proc/meminfo"):
         try:
-            for line in open("/proc/meminfo", "r", encoding="utf-8"):
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) * 1024
+            with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+                for line in handle:
+                    if line.startswith("MemTotal:"):
+                        return int(line.split()[1]) * 1024
         except OSError:
             pass
     try:
