@@ -334,5 +334,58 @@ class ColdVaultTests(unittest.TestCase):
             self.assertNotIn(due_id, {item["id"] for item in restored.prospective.list("pending")})
 
 
+    def test_continuity_replays_updates_after_checkpoint(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = self.make_vault(root)
+            vault.set_state({"active_project": "Generator", "objective": "Diagnose no-start"})
+            vault.checkpoint("before-more-work")
+            vault.set_state({"next_action": "Inspect fuel flow", "uncertainties": ["Fuel age unknown"]})
+
+            restored = self.make_vault(root)
+            state = restored.continuity.snapshot()
+            self.assertEqual(state["active_project"], "Generator")
+            self.assertEqual(state["objective"], "Diagnose no-start")
+            self.assertEqual(state["next_action"], "Inspect fuel flow")
+            self.assertEqual(state["uncertainties"], ["Fuel age unknown"])
+
+    def test_tool_jobs_recover_interrupted_and_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = self.make_vault(root)
+            vault.memory.remember("Generator spark confirmed", source="unit-test")
+            success = vault.run_tool("memory.search", {"query": "generator spark"})
+            self.assertTrue(success["ok"])
+            completed = vault.jobs.get(success["job_id"])
+            self.assertEqual(completed.status, "succeeded")
+
+            now = datetime.now(timezone.utc).isoformat()
+            interrupted_id = "interrupted-job-test"
+            with vault.db.connect() as con:
+                con.execute(
+                    """INSERT INTO tool_jobs
+                       (id, created_at, updated_at, started_at, finished_at, tool_name,
+                        args_json, status, result_json, error, attempt, parent_job_id)
+                       VALUES (?, ?, ?, ?, NULL, ?, ?, 'running', NULL, NULL, 1, NULL)""",
+                    (
+                        interrupted_id,
+                        now,
+                        now,
+                        now,
+                        "memory.search",
+                        json.dumps({"query": "generator spark"}),
+                    ),
+                )
+
+            restored = self.make_vault(root)
+            interrupted = restored.jobs.get(interrupted_id)
+            self.assertEqual(interrupted.status, "interrupted")
+            retried = restored.retry_tool_job(interrupted_id)
+            self.assertTrue(retried["ok"])
+            self.assertEqual(retried["job"]["status"], "succeeded")
+            self.assertEqual(retried["job"]["parent_job_id"], interrupted_id)
+            self.assertEqual(retried["job"]["attempt"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
