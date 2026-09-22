@@ -18,6 +18,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("db-check")
     sub.add_parser("models")
     sub.add_parser("tools")
+    sub.add_parser("jobs")
+
+    job_retry = sub.add_parser("job-retry")
+    job_retry.add_argument("id")
+
+    job_cancel = sub.add_parser("job-cancel")
+    job_cancel.add_argument("id")
     sub.add_parser("conversations")
     sub.add_parser("projects")
     sub.add_parser("beliefs")
@@ -152,6 +159,12 @@ def main() -> None:
         print_json(vault.models.summary())
     elif args.cmd == "tools":
         print_json(vault.tools.list())
+    elif args.cmd == "jobs":
+        print_json(vault.jobs.list(limit=100))
+    elif args.cmd == "job-retry":
+        print_json(vault.retry_tool_job(args.id))
+    elif args.cmd == "job-cancel":
+        print_json(vault.cancel_tool_job(args.id))
     elif args.cmd == "conversations":
         print_json(vault.conversations.list())
     elif args.cmd == "projects":
