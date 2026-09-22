@@ -20,8 +20,7 @@ The initial foundation includes:
 - CLI
 - Local browser UI at port `7777`
 - Streaming browser responses from local OpenAI-compatible model servers\n- Local speech-to-text and text-to-speech adapters\n- Local multimodal image/vision analysis\n- Zero required Python runtime dependencies beyond the standard library
-- Offline smoke tests and recovery documentation
-
+- Offline smoke tests and recovery documentation\n- ColdVault Ark catalog with category completeness checks, SHA-256 integrity scanning, and human-readable recovery index\n- No-model/no-WAN resurrection harness in CI\n- Old-phone Android/Termux launcher with conservative GGUF selection\n
 It does **not** fake missing features. Model weights are not committed, and image indexing, audio/video indexing, resumable agent jobs, signed recovery media, and Android survival mode remain roadmap phases.
 
 ## Architecture
@@ -184,3 +183,4 @@ Losing hardware should reduce model capability, not erase identity, memory, know
 Next priority: prospective memory, crash/resume continuity, signed recovery state, deeper media indexing, and the Android survival runtime.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+\n## Old-phone survival\n\nThe first Android survival profile is documented in [`survival/android-termux/README.md`](survival/android-termux/README.md). It deliberately contains no package downloads: the phone must be restorable from the physical ColdVault Ark.\n
