@@ -73,16 +73,20 @@ class ModelRegistry:
             ))
         return profiles
 
-    def select(self, route: str) -> ModelProfile:
+    def candidates(self, route: str) -> list[ModelProfile]:
         capability = self.ROUTE_CAPABILITY.get(route, "general")
         eligible = [p for p in self.profiles if p.enabled and capability in p.capabilities]
         if not eligible and capability != "general":
             eligible = [p for p in self.profiles if p.enabled and "general" in p.capabilities]
         if not eligible:
             eligible = [p for p in self.profiles if p.enabled]
+        return sorted(eligible, key=lambda p: p.priority, reverse=True)
+
+    def select(self, route: str) -> ModelProfile:
+        eligible = self.candidates(route)
         if not eligible:
             raise RuntimeError("no enabled local model profiles")
-        return sorted(eligible, key=lambda p: p.priority, reverse=True)[0]
+        return eligible[0]
 
     def summary(self) -> list[dict]:
         return [
