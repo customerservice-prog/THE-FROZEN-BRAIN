@@ -539,5 +539,67 @@ class ColdVaultTests(unittest.TestCase):
                 self.assertIn("Fuel flow is below specification", beliefs)
 
 
+    def test_model_failover_drops_to_local_profile(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                config_dir = root / "config"
+                config_dir.mkdir()
+                (config_dir / "models.json").write_text(json.dumps({
+                    "profiles": {
+                        "lan-frontier": {
+                            "purpose": "reasoning",
+                            "model": "frontier",
+                            "base_url": "http://127.0.0.1:9/v1",
+                            "capabilities": ["general", "reasoning", "coding"],
+                            "priority": 100,
+                            "enabled": True,
+                        },
+                        "phone-local": {
+                            "purpose": "survival",
+                            "model": "test",
+                            "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                            "capabilities": ["general", "reasoning", "coding"],
+                            "priority": 10,
+                            "enabled": True,
+                        },
+                    }
+                }), encoding="utf-8")
+                paths = Paths(
+                    root / "vault",
+                    root / "vault" / "db.sqlite3",
+                    root / "vault" / "knowledge",
+                    root / "vault" / "checkpoints",
+                    root / "vault" / "workspace",
+                    root / "vault" / "logs",
+                ).ensure()
+                vault = ColdVault(
+                    repo_root=root,
+                    paths=paths,
+                    model=ModelConfig(name="unused", base_url="http://127.0.0.1:9/v1", timeout_seconds=1),
+                )
+                result = vault.chat("hello", conversation_id="failover")
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["profile"], "phone-local")
+                self.assertEqual(result["answer"], "Hello")
+                self.assertEqual(len(result["failures"]), 1)
+                self.assertEqual(result["failures"][0]["profile"], "lan-frontier")
+
+                events = list(vault.chat_stream("hello again", conversation_id="failover-stream"))
+                done = [e for e in events if e["type"] == "done"][0]
+                meta = [e for e in events if e["type"] == "meta"][0]
+                self.assertTrue(done["ok"])
+                self.assertEqual(done["profile"], "phone-local")
+                self.assertEqual(done["answer"], "Hello")
+                self.assertEqual(meta["failovers"][0]["profile"], "lan-frontier")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
 if __name__ == "__main__":
     unittest.main()
