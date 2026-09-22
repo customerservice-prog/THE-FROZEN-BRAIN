@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coldvault-ai"
+version = "0.1.0"
+description = "Local-first continuity, memory, knowledge and orchestration layer for THE FROZEN BRAIN"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "THE FROZEN BRAIN contributors"}]
+dependencies = []
+
+[project.scripts]
+coldvault = "coldvault.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["coldvault*"]
