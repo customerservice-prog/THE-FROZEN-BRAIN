@@ -1,9 +1,45 @@
 {
   "profiles": {
-    "frontier": {"purpose": "maximum reasoning", "provider": "openai-compatible-local"},
-    "coding": {"purpose": "software engineering", "provider": "openai-compatible-local"},
-    "fast": {"purpose": "low latency general use", "provider": "openai-compatible-local"},
-    "mobile": {"purpose": "constrained hardware fallback", "provider": "on-device"}
+    "frontier": {
+      "purpose": "maximum reasoning",
+      "model": "local-frontier-model",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "capabilities": ["general", "reasoning", "coding"],
+      "priority": 100,
+      "enabled": true
+    },
+    "coding": {
+      "purpose": "software engineering",
+      "model": "local-coding-model",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "capabilities": ["coding", "general"],
+      "priority": 90,
+      "enabled": true
+    },
+    "fast": {
+      "purpose": "low latency general use",
+      "model": "local-fast-model",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "capabilities": ["general"],
+      "priority": 60,
+      "enabled": true
+    },
+    "vision": {
+      "purpose": "multimodal perception",
+      "model": "local-vision-model",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "capabilities": ["vision", "general"],
+      "priority": 80,
+      "enabled": false
+    },
+    "mobile": {
+      "purpose": "constrained hardware fallback",
+      "model": "local-mobile-model",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "capabilities": ["general"],
+      "priority": 10,
+      "enabled": false
+    }
   },
-  "note": "Model weights are deliberately not stored in Git. ColdVault archives them separately with hashes and manifests."
+  "note": "Replace model names with models physically archived and installed on your local runtime. Model weights are intentionally not stored in Git."
 }
