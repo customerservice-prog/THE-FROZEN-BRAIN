@@ -6,84 +6,155 @@ from pathlib import Path
 
 from .config import ModelConfig, Paths, load_identity
 from .continuity import ContinuityEngine
+from .conversations import ConversationStore
 from .db import Database
 from .knowledge import KnowledgeStore
 from .memory import MemoryStore
+from .model_registry import ModelRegistry
+from .projects import ProjectStore
 from .providers import OpenAICompatibleProvider, ProviderError
 from .router import classify_request, model_hint
+from .tool_protocol import ToolRegistry, permission_from_env
 
 
 class ColdVault:
     def __init__(self, repo_root: Path | None = None, paths: Paths | None = None, model: ModelConfig | None = None):
         self.repo_root = repo_root or Path(__file__).resolve().parent.parent
         self.paths = (paths or Paths.from_env()).ensure()
-        self.model_config = model or ModelConfig.from_env()
+        self.model_config = (model or ModelConfig.from_env()).validate_privacy()
         self.db = Database(self.paths.db)
         self.memory = MemoryStore(self.db)
         self.knowledge = KnowledgeStore(self.db)
         self.continuity = ContinuityEngine(self.db, self.paths.checkpoints)
+        self.conversations = ConversationStore(self.db)
+        self.projects = ProjectStore(self.db)
         self.identity = load_identity(self.repo_root)
-        self.provider = OpenAICompatibleProvider(self.model_config)
+        self.models = ModelRegistry(self.repo_root, self.model_config)
+        self.tools = ToolRegistry(
+            self.paths.workspace,
+            self.memory,
+            self.knowledge,
+            permission=permission_from_env(),
+        )
+
+    def _provider_for_route(self, route: str) -> tuple[object, OpenAICompatibleProvider]:
+        profile = self.models.select(route)
+        config = profile.as_config().validate_privacy()
+        return profile, OpenAICompatibleProvider(config)
 
     def status(self) -> dict:
+        profile, provider = self._provider_for_route("general")
         return {
             "name": self.identity.get("name", "ColdVault"),
-            "version": 1,
+            "version": 2,
             "home": str(self.paths.home),
-            "model": self.model_config.name,
-            "provider": self.provider.health(),
+            "selected_profile": profile.name,
+            "model": profile.model,
+            "provider": provider.health(),
+            "model_profiles": self.models.summary(),
+            "tools": self.tools.list(),
+            "database": self.db.integrity_check(),
             "cognitive_state": self.continuity.snapshot(),
         }
 
-    def build_messages(self, user_text: str) -> list[dict]:
-        route = classify_request(user_text)
+    def build_messages(self, user_text: str, conversation_id: str, route: str, profile_name: str) -> tuple[list[dict], list[dict]]:
         memories = self.memory.search(user_text, limit=6)
         knowledge = self.knowledge.search(user_text, limit=5)
         identity = json.dumps(self.identity, ensure_ascii=False, indent=2)
         state = json.dumps(self.continuity.snapshot(), ensure_ascii=False, indent=2)
-        memory_text = "\n".join(f"- [{m.kind}] {m.content} (source={m.source or 'unknown'}, confidence={m.confidence:.2f})" for m in memories) or "- none retrieved"
-        knowledge_text = "\n\n".join(f"SOURCE: {k['source']}#{k['chunk_index']}\n{k['content']}" for k in knowledge) or "No local knowledge passages retrieved."
+        memory_text = "\n".join(
+            f"- [{m.kind}] {m.content} (source={m.source or 'unknown'}, confidence={m.confidence:.2f})"
+            for m in memories
+        ) or "- none retrieved"
+        knowledge_text = "\n\n".join(
+            f"SOURCE: {k['source']}#{k['chunk_index']}\n{k['content']}"
+            for k in knowledge
+        ) or "No local knowledge passages retrieved."
         system = f"""You are the local ColdVault AI instance. You run for the user, not for a cloud service.
 
-IDENTITY\n{identity}
+IDENTITY
+{identity}
 
-CURRENT COGNITIVE STATE\n{state}
+CURRENT COGNITIVE STATE
+{state}
 
-ROUTE\n{route}: {model_hint(route)}
+ROUTE
+{route}: {model_hint(route)}
+Selected model profile: {profile_name}
 
-RELEVANT DURABLE MEMORY\n{memory_text}
+RELEVANT DURABLE MEMORY
+{memory_text}
 
-LOCAL KNOWLEDGE\n{knowledge_text}
+LOCAL KNOWLEDGE
+{knowledge_text}
 
 Rules:
 - Treat retrieved memory as evidence with provenance, not infallible truth.
 - Say when information is uncertain or unavailable.
 - Never claim a tool ran unless the system actually ran it.
 - Prefer local knowledge and verification when available.
-- Keep the user's durable state distinct from temporary conversation context.
+- Keep durable memory distinct from temporary conversation context.
+- When local knowledge materially supports an answer, identify its SOURCE label.
 """
-        return [{"role": "system", "content": system}, {"role": "user", "content": user_text}]
+        history = self.conversations.history(conversation_id, limit=24)
+        messages = [{"role": "system", "content": system}]
+        for item in history:
+            if item["role"] in {"user", "assistant"}:
+                messages.append({"role": item["role"], "content": item["content"]})
+        return messages, knowledge
 
-    def chat(self, user_text: str) -> dict:
+    def chat(self, user_text: str, conversation_id: str = "default") -> dict:
         text = user_text.strip()
         if not text:
             raise ValueError("message cannot be empty")
-        self.db.add_event("chat.user", {"text": text})
+        conversation_id = self.conversations.ensure(conversation_id)
+        self.conversations.append(conversation_id, "user", text)
+        self.db.add_event("chat.user", {"text": text, "conversation_id": conversation_id})
+        route = classify_request(text)
+        profile, provider = self._provider_for_route(route)
+        messages, knowledge = self.build_messages(text, conversation_id, route, profile.name)
         try:
-            answer = self.provider.chat(self.build_messages(text))
+            answer = provider.chat(messages)
             ok = True
         except ProviderError as exc:
             answer = (
-                "The ColdVault core is running, but no compatible local model answered. "
-                f"Configured endpoint: {self.model_config.base_url}, model: {self.model_config.name}. "
+                "The ColdVault continuity core is running, but the selected local model did not answer. "
+                f"Profile: {profile.name}; model: {profile.model}; endpoint: {profile.base_url}. "
                 f"Provider error: {exc}"
             )
             ok = False
-        self.db.add_event("chat.assistant", {"text": answer, "provider_ok": ok})
-        return {"ok": ok, "answer": answer, "route": classify_request(text)}
+        metadata = json.dumps({"route": route, "profile": profile.name, "provider_ok": ok}, sort_keys=True)
+        self.conversations.append(conversation_id, "assistant", answer, metadata)
+        self.db.add_event(
+            "chat.assistant",
+            {"text": answer, "provider_ok": ok, "conversation_id": conversation_id, "route": route, "profile": profile.name},
+        )
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+        return {
+            "ok": ok,
+            "answer": answer,
+            "route": route,
+            "profile": profile.name,
+            "model": profile.model,
+            "conversation_id": conversation_id,
+            "sources": sources,
+        }
 
     def checkpoint(self, reason: str = "manual") -> dict:
         return self.continuity.checkpoint(reason)
 
     def set_state(self, changes: dict) -> dict:
-        return asdict(self.continuity.update(**changes))
+        state = asdict(self.continuity.update(**changes))
+        if state.get("active_project"):
+            self.projects.upsert(state["active_project"], state)
+        return state
+
+    def run_tool(self, name: str, arguments: dict) -> dict:
+        self.db.add_event("tool.requested", {"name": name, "arguments": arguments})
+        try:
+            result = self.tools.run(name, arguments)
+        except Exception as exc:
+            self.db.add_event("tool.failed", {"name": name, "error": repr(exc)})
+            raise
+        self.db.add_event("tool.completed", {"name": name})
+        return {"ok": True, "tool": name, "result": result}
