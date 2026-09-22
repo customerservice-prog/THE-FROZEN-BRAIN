@@ -13,8 +13,11 @@ from types import SimpleNamespace
 from coldvault.ark import build_ark_catalog, verify_ark
 from coldvault.config import EmbeddingConfig, ModelConfig, Paths
 from coldvault.core import ColdVault
+from coldvault.discovery import build_beacon, verify_beacon
 from coldvault.embeddings import LocalEmbeddingProvider
+from coldvault.providers import OpenAICompatibleProvider
 from coldvault.speech import LocalSpeechProvider, SpeechSettings
+from coldvault.server import Handler
 from coldvault.survival import select_survival_model
 from coldvault.survival_bundle import build_survival_bundle, verify_survival_bundle
 from coldvault.tools import ToolPolicy, WorkspaceTools
@@ -599,6 +602,87 @@ class ColdVaultTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+
+    def test_authenticated_discovery_beacon_rejects_tampering(self):
+        key = b"offline-shared-discovery-secret"
+        beacon = build_beacon(7777, key, instance="Bunker Brain", timestamp=1000)
+        self.assertTrue(verify_beacon(beacon, key, now=1000))
+        tampered = dict(beacon)
+        tampered["service_port"] = 8888
+        self.assertFalse(verify_beacon(tampered, key, now=1000))
+        self.assertFalse(verify_beacon(beacon, b"wrong-key", now=1000))
+        self.assertFalse(verify_beacon(beacon, key, now=2000, max_age_seconds=15))
+
+    def test_authenticated_lan_inference_gateway_is_openai_compatible(self):
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelHandler)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        gateway = None
+        gateway_thread = None
+        old_token = Handler.access_token
+        old_require = Handler.require_auth
+        old_vault = getattr(Handler, "vault", None)
+        old_web_root = getattr(Handler, "web_root", None)
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                paths = Paths(
+                    root / "vault",
+                    root / "vault" / "db.sqlite3",
+                    root / "vault" / "knowledge",
+                    root / "vault" / "checkpoints",
+                    root / "vault" / "workspace",
+                    root / "vault" / "logs",
+                ).ensure()
+                vault = ColdVault(
+                    repo_root=root,
+                    paths=paths,
+                    model=ModelConfig(
+                        name="test",
+                        base_url=f"http://127.0.0.1:{upstream.server_port}/v1",
+                        timeout_seconds=2,
+                    ),
+                )
+                Handler.vault = vault
+                Handler.web_root = root
+                Handler.access_token = "lan-secret"
+                Handler.require_auth = True
+                gateway = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+                gateway_thread.start()
+
+                client = OpenAICompatibleProvider(ModelConfig(
+                    name="test",
+                    base_url=f"http://127.0.0.1:{gateway.server_port}/v1",
+                    api_key="lan-secret",
+                    timeout_seconds=2,
+                ))
+                self.assertEqual(
+                    client.chat([{"role": "user", "content": "hello"}]),
+                    "Hello",
+                )
+                self.assertEqual(
+                    "".join(client.stream_chat([{"role": "user", "content": "hello"}])),
+                    "Hello",
+                )
+                health = client.health()
+                self.assertTrue(health["ok"])
+        finally:
+            if gateway is not None:
+                gateway.shutdown()
+                gateway.server_close()
+            if gateway_thread is not None:
+                gateway_thread.join(timeout=2)
+            upstream.shutdown()
+            upstream.server_close()
+            upstream_thread.join(timeout=2)
+            Handler.access_token = old_token
+            Handler.require_auth = old_require
+            if old_vault is not None:
+                Handler.vault = old_vault
+            if old_web_root is not None:
+                Handler.web_root = old_web_root
 
 
 if __name__ == "__main__":
