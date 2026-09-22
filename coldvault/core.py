@@ -16,6 +16,7 @@ from .knowledge import KnowledgeStore
 from .memory import MemoryStore
 from .model_registry import ModelRegistry
 from .projects import ProjectStore
+from .prospective import ProspectiveMemory
 from .providers import OpenAICompatibleProvider, ProviderError
 from .router import classify_request, model_hint
 from .speech import LocalSpeechProvider, SpeechSettings
@@ -37,6 +38,7 @@ class ColdVault:
         self.continuity = ContinuityEngine(self.db, self.paths.checkpoints)
         self.conversations = ConversationStore(self.db)
         self.projects = ProjectStore(self.db)
+        self.prospective = ProspectiveMemory(self.db)
         self.identity = load_identity(self.repo_root)
         self.speech = LocalSpeechProvider(SpeechSettings.from_env())
         self.models = ModelRegistry(self.repo_root, self.model_config)
@@ -68,6 +70,7 @@ class ColdVault:
             "tools": self.tools.list(),
             "database": self.db.integrity_check(),
             "cognitive_state": self.continuity.snapshot(),
+            "prospective_due": self.prospective.due(),
         }
 
     def build_messages(self, user_text: str, conversation_id: str, route: str, profile_name: str) -> tuple[list[dict], list[dict]]:
@@ -76,6 +79,7 @@ class ColdVault:
         identity = json.dumps(self.identity, ensure_ascii=False, indent=2)
         state = json.dumps(self.continuity.snapshot(), ensure_ascii=False, indent=2)
         belief_text = self.beliefs.summary_for_prompt(user_text, limit=6)
+        prospective_text = self.prospective.summary_for_prompt()
         memory_text = "\n".join(
             f"- [{m.kind}] {m.content} (source={m.source or 'unknown'}, confidence={m.confidence:.2f})"
             for m in memories
@@ -101,6 +105,9 @@ RELEVANT DURABLE MEMORY
 
 CURRENT BELIEF / EVIDENCE STATE
 {belief_text}
+
+PROSPECTIVE MEMORY / FUTURE COMMITMENTS
+{prospective_text}
 
 LOCAL KNOWLEDGE
 {knowledge_text}
