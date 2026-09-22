@@ -20,6 +20,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tools")
     sub.add_parser("conversations")
     sub.add_parser("projects")
+    sub.add_parser("beliefs")
+
+    belief_add = sub.add_parser("belief-add")
+    belief_add.add_argument("claim")
+    belief_add.add_argument("--classification", default="hypothesis")
+    belief_add.add_argument("--confidence", type=float, default=0.5)
+    belief_add.add_argument("--source", default="user")
+
+    belief_search = sub.add_parser("belief-search")
+    belief_search.add_argument("query")
+    belief_search.add_argument("--limit", type=int, default=8)
+
+    evidence_add = sub.add_parser("evidence-add")
+    evidence_add.add_argument("belief_id")
+    evidence_add.add_argument("content")
+    evidence_add.add_argument("--kind", choices=["supports", "contradicts", "context"], default="supports")
+    evidence_add.add_argument("--source", default="user")
+    evidence_add.add_argument("--confidence", type=float, default=1.0)
 
     chat = sub.add_parser("chat")
     chat.add_argument("message", nargs="+")
@@ -112,6 +130,20 @@ def main() -> None:
         print_json(vault.conversations.list())
     elif args.cmd == "projects":
         print_json(vault.projects.list())
+    elif args.cmd == "beliefs":
+        print_json([b.as_dict() for b in vault.beliefs.search("", limit=50)])
+    elif args.cmd == "belief-add":
+        print(vault.beliefs.create(
+            args.claim, classification=args.classification,
+            confidence=args.confidence, source=args.source,
+        ))
+    elif args.cmd == "belief-search":
+        print_json([b.as_dict() for b in vault.beliefs.search(args.query, limit=args.limit)])
+    elif args.cmd == "evidence-add":
+        print(vault.beliefs.add_evidence(
+            args.belief_id, args.content, kind=args.kind,
+            source=args.source, confidence=args.confidence,
+        ))
     elif args.cmd == "chat":
         print_json(vault.chat(" ".join(args.message), conversation_id=args.session))
     elif args.cmd == "think":
