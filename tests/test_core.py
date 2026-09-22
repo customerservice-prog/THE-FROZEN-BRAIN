@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import zipfile
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -683,6 +685,40 @@ class ColdVaultTests(unittest.TestCase):
                 Handler.vault = old_vault
             if old_web_root is not None:
                 Handler.web_root = old_web_root
+
+
+    def test_authenticated_checkpoint_rejects_forged_checksum(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with patch.dict("os.environ", {"COLDVAULT_CHECKPOINT_KEY": "offline-checkpoint-secret"}, clear=False):
+                vault = self.make_vault(root)
+                vault.set_state({"active_project": "ColdVault", "objective": "Preserve continuity"})
+                checkpoint = vault.checkpoint("authenticated-test")
+                self.assertTrue(checkpoint["authenticated"])
+
+                restored = self.make_vault(root)
+                self.assertEqual(restored.continuity.snapshot()["active_project"], "ColdVault")
+
+                with restored.db.connect() as con:
+                    row = con.execute(
+                        "SELECT id, state_json FROM checkpoints ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    forged = json.loads(row["state_json"])
+                    forged["objective"] = "FORGED STATE"
+                    canonical = json.dumps(
+                        forged,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    forged_checksum = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                    con.execute(
+                        "UPDATE checkpoints SET state_json=?, checksum=? WHERE id=?",
+                        (canonical, forged_checksum, row["id"]),
+                    )
+
+                with self.assertRaisesRegex(RuntimeError, "authentication"):
+                    self.make_vault(root)
 
 
 if __name__ == "__main__":
