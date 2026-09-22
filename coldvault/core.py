@@ -5,11 +5,12 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .beliefs import BeliefStore
-from .config import ModelConfig, Paths, load_identity
+from .config import EmbeddingConfig, ModelConfig, Paths, load_identity
 from .continuity import ContinuityEngine
 from .conversations import ConversationStore
 from .db import Database
 from .deliberation import DeliberationEngine
+from .embeddings import LocalEmbeddingProvider
 from .hardware import detect_hardware
 from .knowledge import KnowledgeStore
 from .memory import MemoryStore
@@ -28,7 +29,9 @@ class ColdVault:
         self.db = Database(self.paths.db)
         self.memory = MemoryStore(self.db)
         self.beliefs = BeliefStore(self.db)
-        self.knowledge = KnowledgeStore(self.db)
+        self.embedding_config = EmbeddingConfig.from_env()
+        self.embedder = LocalEmbeddingProvider(self.embedding_config) if self.embedding_config.enabled else None
+        self.knowledge = KnowledgeStore(self.db, self.embedder)
         self.continuity = ContinuityEngine(self.db, self.paths.checkpoints)
         self.conversations = ConversationStore(self.db)
         self.projects = ProjectStore(self.db)
@@ -57,6 +60,7 @@ class ColdVault:
             "model": profile.model,
             "provider": provider.health(),
             "model_profiles": self.models.summary(),
+            "embedding_model": self.knowledge.embedding_model,
             "tools": self.tools.list(),
             "database": self.db.integrity_check(),
             "cognitive_state": self.continuity.snapshot(),
