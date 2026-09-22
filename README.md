@@ -15,17 +15,15 @@ The initial foundation includes:
 - Structured belief/evidence tracking that preserves hypotheses, assumptions, support, and contradictions
 - Persistent cognitive state for active project, objective, hypotheses, uncertainty, next action, and related state
 - SHA-256 cognitive checkpoints that restore after restart
-- Local text knowledge ingestion and retrieval
-- A provider adapter for a **local** OpenAI-compatible model server
+- Local document ingestion for text, HTML, DOCX, and offline PDF extraction when archived support is present\n- Hybrid lexical + optional local semantic retrieval through a local embedding model\n- A provider adapter for a **local** OpenAI-compatible model server
 - Multi-model capability routing and Deep Think deliberation with independent solvers + critic synthesis
 - Permission-scoped workspace tools with path-escape protection
 - CLI
 - Local browser UI at port `7777`
-- Streaming browser responses from local OpenAI-compatible model servers
-- Zero required Python runtime dependencies beyond the standard library
+- Streaming browser responses from local OpenAI-compatible model servers\n- Local speech-to-text and text-to-speech adapters\n- Local multimodal image/vision analysis\n- Zero required Python runtime dependencies beyond the standard library
 - Offline smoke tests and recovery documentation
 
-It does **not** fake missing features. Model weights, multimodal perception, voice, autonomous tool execution, multi-agent deliberation, and Android survival mode are separate roadmap phases.
+It does **not** fake missing features. Model weights are not committed, and image indexing, audio/video indexing, resumable agent jobs, signed recovery media, and Android survival mode remain roadmap phases.
 
 ## Architecture
 
@@ -184,6 +182,6 @@ Losing hardware should reduce model capability, not erase identity, memory, know
 
 **v0.1: working continuity foundation.**
 
-Next priority: real multi-model routing, streaming conversations, permission-gated tool execution, project workspaces, and the Android survival runtime.
+Next priority: prospective memory, crash/resume continuity, signed recovery state, deeper media indexing, and the Android survival runtime.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
