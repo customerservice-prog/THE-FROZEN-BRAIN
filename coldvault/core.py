@@ -91,11 +91,17 @@ Selected model profile: {profile_name}
 RELEVANT DURABLE MEMORY
 {memory_text}
 
+CURRENT BELIEF / EVIDENCE STATE
+{belief_text}
+
 LOCAL KNOWLEDGE
 {knowledge_text}
 
 Rules:
 - Treat retrieved memory as evidence with provenance, not infallible truth.
+- Distinguish facts, observations, user reports, documented claims, inferences, hypotheses, assumptions, disputes, and unknowns.
+- Never silently promote a hypothesis or assumption into a fact because it was repeated.
+- Preserve contradictory evidence and state the conflict when it matters.
 - Say when information is uncertain or unavailable.
 - Never claim a tool ran unless the system actually ran it.
 - Prefer local knowledge and verification when available.
@@ -137,6 +143,70 @@ Rules:
         )
         sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
         return {
+            "ok": ok,
+            "answer": answer,
+            "route": route,
+            "profile": profile.name,
+            "model": profile.model,
+            "conversation_id": conversation_id,
+            "sources": sources,
+        }
+
+    def chat_stream(self, user_text: str, conversation_id: str = "default"):
+        """Yield structured streaming events while preserving the final assistant message durably."""
+        text = user_text.strip()
+        if not text:
+            raise ValueError("message cannot be empty")
+        conversation_id = self.conversations.ensure(conversation_id)
+        self.conversations.append(conversation_id, "user", text)
+        self.db.add_event("chat.user", {"text": text, "conversation_id": conversation_id, "stream": True})
+        route = classify_request(text)
+        profile, provider = self._provider_for_route(route)
+        messages, knowledge = self.build_messages(text, conversation_id, route, profile.name)
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+
+        yield {
+            "type": "meta",
+            "route": route,
+            "profile": profile.name,
+            "model": profile.model,
+            "conversation_id": conversation_id,
+            "sources": sources,
+        }
+
+        parts: list[str] = []
+        ok = True
+        try:
+            for chunk in provider.stream_chat(messages):
+                parts.append(chunk)
+                yield {"type": "delta", "text": chunk}
+            answer = "".join(parts).strip()
+            if not answer:
+                raise ProviderError("local model stream ended without text")
+        except ProviderError as exc:
+            ok = False
+            answer = (
+                "The ColdVault continuity core is running, but the selected local model stream did not complete. "
+                f"Profile: {profile.name}; model: {profile.model}; endpoint: {profile.base_url}. "
+                f"Provider error: {exc}"
+            )
+            yield {"type": "error", "text": answer}
+
+        metadata = json.dumps({"route": route, "profile": profile.name, "provider_ok": ok, "stream": True}, sort_keys=True)
+        self.conversations.append(conversation_id, "assistant", answer, metadata)
+        self.db.add_event(
+            "chat.assistant",
+            {
+                "text": answer,
+                "provider_ok": ok,
+                "conversation_id": conversation_id,
+                "route": route,
+                "profile": profile.name,
+                "stream": True,
+            },
+        )
+        yield {
+            "type": "done",
             "ok": ok,
             "answer": answer,
             "route": route,
