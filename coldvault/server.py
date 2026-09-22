@@ -4,7 +4,7 @@ import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .core import ColdVault
 
@@ -22,6 +22,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -46,30 +47,55 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         body = path.read_bytes()
-        ctype = "text/html; charset=utf-8" if target.endswith(".html") else "application/javascript; charset=utf-8" if target.endswith(".js") else "text/css; charset=utf-8"
+        if target.endswith(".html"):
+            ctype = "text/html; charset=utf-8"
+        elif target.endswith(".js"):
+            ctype = "application/javascript; charset=utf-8"
+        else:
+            ctype = "text/css; charset=utf-8"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         if path == "/api/status":
             self._json(self.vault.status())
-            return
-        if path == "/api/events":
+        elif path == "/api/events":
             self._json(self.vault.db.recent_events(100))
-            return
-        self._static(path)
+        elif path == "/api/conversations":
+            self._json(self.vault.conversations.list())
+        elif path == "/api/history":
+            conversation_id = query.get("conversation_id", ["default"])[0]
+            self._json(self.vault.conversations.history(conversation_id, limit=100))
+        elif path == "/api/projects":
+            self._json(self.vault.projects.list())
+        elif path == "/api/tasks":
+            project = query.get("project", [""])[0]
+            self._json(self.vault.projects.tasks(project) if project else [])
+        elif path == "/api/tools":
+            self._json(self.vault.tools.list())
+        else:
+            self._static(path)
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
             data = self._read_json()
             if path == "/api/chat":
-                self._json(self.vault.chat(str(data.get("message", ""))))
+                self._json(self.vault.chat(
+                    str(data.get("message", "")),
+                    conversation_id=str(data.get("conversation_id", "default")),
+                ))
+            elif path == "/api/conversations":
+                conversation_id = self.vault.conversations.create(str(data.get("title", "New conversation")))
+                self._json({"ok": True, "conversation_id": conversation_id}, 201)
             elif path == "/api/memory":
                 memory_id = self.vault.memory.remember(
                     str(data.get("content", "")),
@@ -88,9 +114,24 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 changes = {k: v for k, v in data.items() if k in allowed}
                 self._json({"ok": True, "state": self.vault.set_state(changes)})
+            elif path == "/api/tasks":
+                task = self.vault.projects.add_task(
+                    str(data.get("project", "")),
+                    str(data.get("title", "")),
+                    str(data.get("details", "")),
+                )
+                self._json({"ok": True, "task": task}, 201)
+            elif path == "/api/task-status":
+                self.vault.projects.set_task_status(str(data.get("task_id", "")), str(data.get("status", "")))
+                self._json({"ok": True})
+            elif path == "/api/tools/run":
+                arguments = data.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    raise ValueError("arguments must be an object")
+                self._json(self.vault.run_tool(str(data.get("name", "")), arguments))
             else:
                 self._json({"ok": False, "error": "not found"}, 404)
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        except (ValueError, TypeError, json.JSONDecodeError, KeyError, PermissionError) as exc:
             self._json({"ok": False, "error": str(exc)}, 400)
         except Exception as exc:
             self.vault.db.add_event("http.error", {"path": path, "error": repr(exc)})
@@ -98,12 +139,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(vault: ColdVault, host: str = "127.0.0.1", port: int = 7777) -> None:
-    repo_root = vault.repo_root
     Handler.vault = vault
-    Handler.web_root = repo_root / "web"
+    Handler.web_root = vault.repo_root / "web"
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"ColdVault UI: http://{host}:{port}")
-    print("Core services are local. Model traffic goes only to the configured provider endpoint.")
+    print("Core services are local. Model traffic goes only to the configured local/LAN provider endpoint by default.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
