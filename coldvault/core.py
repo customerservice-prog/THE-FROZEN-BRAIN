@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from .beliefs import BeliefStore
 from .config import ModelConfig, Paths, load_identity
 from .continuity import ContinuityEngine
 from .conversations import ConversationStore
@@ -26,6 +27,7 @@ class ColdVault:
         self.model_config = (model or ModelConfig.from_env()).validate_privacy()
         self.db = Database(self.paths.db)
         self.memory = MemoryStore(self.db)
+        self.beliefs = BeliefStore(self.db)
         self.knowledge = KnowledgeStore(self.db)
         self.continuity = ContinuityEngine(self.db, self.paths.checkpoints)
         self.conversations = ConversationStore(self.db)
@@ -65,6 +67,7 @@ class ColdVault:
         knowledge = self.knowledge.search(user_text, limit=5)
         identity = json.dumps(self.identity, ensure_ascii=False, indent=2)
         state = json.dumps(self.continuity.snapshot(), ensure_ascii=False, indent=2)
+        belief_text = self.beliefs.summary_for_prompt(user_text, limit=6)
         memory_text = "\n".join(
             f"- [{m.kind}] {m.content} (source={m.source or 'unknown'}, confidence={m.confidence:.2f})"
             for m in memories
