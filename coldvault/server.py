@@ -97,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.vault.tools.list())
         elif path == "/api/reminders":
             self._json(self.vault.prospective.list("pending", limit=100))
+        elif path == "/api/jobs":
+            self._json(self.vault.jobs.list(limit=100))
         else:
             self._static(path)
 
@@ -169,6 +171,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(arguments, dict):
                     raise ValueError("arguments must be an object")
                 self._json(self.vault.run_tool(str(data.get("name", "")), arguments))
+            elif path == "/api/job-retry":
+                self._json(self.vault.retry_tool_job(str(data.get("id", ""))))
+            elif path == "/api/job-cancel":
+                self._json(self.vault.cancel_tool_job(str(data.get("id", ""))))
             else:
                 self._json({"ok": False, "error": "not found"}, 404)
         except (ValueError, TypeError, json.JSONDecodeError, KeyError, PermissionError) as exc:
