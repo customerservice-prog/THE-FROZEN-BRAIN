@@ -14,16 +14,16 @@
 
 ## Phase 1 — Real local assistant
 
-- [ ] Multi-model registry and capability-aware router
-- [ ] Separate fast/reasoning/coding/vision profiles
+- [x] Multi-model registry and capability-aware router
+- [x] Separate capability profiles for general/reasoning/coding/vision routing
 - [ ] Streaming generation
-- [ ] Conversation/session persistence
-- [ ] Tool-call protocol with explicit permission gates
-- [ ] Sandboxed Python/code execution
-- [ ] Project workspaces and task graph
+- [x] Conversation/session persistence
+- [x] Tool registry with explicit permission gates
+- [x] Isolated Python execution with timeout and workspace scope
+- [x] Persistent projects and task work queue
 - [ ] Better lexical + optional embedding retrieval
-- [ ] Source citations in answers
-- [ ] Import/export of durable memory in open formats
+- [x] Local knowledge source labels returned with answers
+- [x] JSONL import/export of durable memory
 
 ## Phase 2 — Perception and voice
 
@@ -36,18 +36,18 @@
 
 ## Phase 3 — Continuity and agents
 
-- [ ] Structured belief/evidence graph
+- [x] Structured belief/evidence graph
 - [ ] Prospective memory scheduler
 - [ ] Crash journal replay
 - [ ] Resumable tool jobs
-- [ ] Solver/critic/verifier orchestration
-- [ ] Multi-agent deliberation with independent attempts
+- [x] Solver/critic/verifier orchestration
+- [x] Multi-agent deliberation with independent attempts
 - [ ] Automatic pre-shutdown checkpointing
 - [ ] Signed checkpoint manifests
 
 ## Phase 4 — Cold-storage Ark
 
-- [ ] Model manifest with SHA-256/BLAKE3 verification
+- [x] SHA-256 archive manifest generation and verification
 - [ ] Runtime/package archive manifests
 - [ ] Offline OS/driver/firmware catalog
 - [ ] Automated archive integrity scanner
