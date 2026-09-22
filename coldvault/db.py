@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     checksum TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS checkpoint_seals (
+    checkpoint_id INTEGER PRIMARY KEY REFERENCES checkpoints(id) ON DELETE CASCADE,
+    algorithm TEXT NOT NULL,
+    tag TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path TEXT NOT NULL,
