@@ -22,4 +22,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Offline smoke test
         run: python scripts/smoke_test.py
-      - name: Resurrection test\n        run: python scripts/resurrection_test.py\n      - name: Byte-compile\n        run: python -m compileall -q coldvault scripts tests\n
+      - name: Resurrection test
+        run: python scripts/resurrection_test.py
+      - name: Byte-compile
+        run: python -m compileall -q coldvault scripts tests
