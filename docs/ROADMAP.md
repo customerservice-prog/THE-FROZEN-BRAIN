@@ -48,18 +48,18 @@
 ## Phase 4 — Cold-storage Ark
 
 - [x] SHA-256 archive manifest generation and verification
-- [ ] Runtime/package archive manifests
-- [ ] Offline OS/driver/firmware catalog
-- [ ] Automated archive integrity scanner
+- [x] Runtime/package artifact catalog + SHA-256 inventory
+- [x] OS/driver/firmware artifact catalog + missing-category warnings
+- [x] Automated archive integrity scanner
 - [ ] Rebuild media generator
-- [ ] Human-readable archive index
-- [ ] Periodic resurrection-test harness
+- [x] Human-readable archive index
+- [x] Offline resurrection-test harness wired into CI
 
 ## Phase 5 — Survival hardware
 
 - [ ] Linux workstation profile
 - [ ] Mini-PC / laptop profile
-- [ ] Android ARM survival runtime
+- [ ] Android ARM survival runtime (Termux/llama.cpp launcher implemented; physical-device verification still required)
 - [ ] Phone-local memory and critical-library subset
 - [ ] Automatic LAN server discovery without Internet
 - [ ] Automatic downgrade to on-device model when server is unavailable
