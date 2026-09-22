@@ -21,6 +21,7 @@ The initial foundation includes:
 - Permission-scoped workspace tools with path-escape protection
 - CLI
 - Local browser UI at port `7777`
+- Streaming browser responses from local OpenAI-compatible model servers
 - Zero required Python runtime dependencies beyond the standard library
 - Offline smoke tests and recovery documentation
 
