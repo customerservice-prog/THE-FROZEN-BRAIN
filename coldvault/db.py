@@ -92,6 +92,31 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS beliefs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    claim TEXT NOT NULL,
+    classification TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'active',
+    source TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_beliefs_status_updated ON beliefs(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS belief_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    belief_id TEXT NOT NULL REFERENCES beliefs(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT,
+    confidence REAL NOT NULL DEFAULT 1.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_belief_evidence_belief ON belief_evidence(belief_id, id);
 """
 
 
