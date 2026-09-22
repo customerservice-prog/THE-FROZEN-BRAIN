@@ -168,28 +168,43 @@ async function refreshStatus() {
   }
 }
 
-$("chatForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function sendMessage(deep = false) {
   const input = $("message");
   const text = input.value.trim();
   if (!text) return;
   addMessage("user", text);
   input.value = "";
   $("send").disabled = true;
+  $("deepThink").disabled = true;
+  if (deep) setText("routeBadge", "DEEP THINK RUNNING");
   try {
-    const result = await api("/api/chat", {
+    const result = await api(deep ? "/api/think" : "/api/chat", {
       method: "POST",
-      body: JSON.stringify({message: text, conversation_id: currentConversation}),
+      body: JSON.stringify({message: text, conversation_id: currentConversation, attempts: 2}),
     });
     addMessage("assistant", result.answer, result.sources || []);
-    setText("routeBadge", `${result.route.toUpperCase()} · ${result.profile}`);
+    if (deep) {
+      setText("routeBadge", `DEEP THINK · ${result.attempts?.length || 0} SOLVERS · ${result.synthesis_profile || "local"}`);
+    } else {
+      setText("routeBadge", `${result.route.toUpperCase()} · ${result.profile}`);
+    }
     await loadConversations();
   } catch (err) {
     addMessage("assistant", `Local core error: ${err.message}`);
   } finally {
     $("send").disabled = false;
+    $("deepThink").disabled = false;
     input.focus();
   }
+}
+
+$("chatForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await sendMessage(false);
+});
+
+$("deepThink").addEventListener("click", async () => {
+  await sendMessage(true);
 });
 
 $("newConversation").addEventListener("click", async () => {
