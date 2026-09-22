@@ -7,6 +7,7 @@ from pathlib import Path
 from .archive import build_manifest, verify_manifest
 from .ark import build_ark_catalog, verify_ark
 from .core import ColdVault
+from .discovery import discover_servers, load_discovery_key
 from .portability import export_memories, import_memories
 from .server import serve
 from .survival import select_survival_model
@@ -18,6 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status")
+
+    discover_cmd = sub.add_parser("discover")
+    discover_cmd.add_argument("--timeout", type=float, default=2.0)
+    discover_cmd.add_argument("--port", type=int, default=47821)
     sub.add_parser("db-check")
     sub.add_parser("models")
     sub.add_parser("tools")
@@ -182,6 +187,11 @@ def main() -> None:
 
     if args.cmd == "status":
         print_json(vault.status())
+    elif args.cmd == "discover":
+        key = load_discovery_key()
+        if not key:
+            raise SystemExit("COLDVAULT_DISCOVERY_KEY or COLDVAULT_DISCOVERY_KEY_FILE is required")
+        print_json(discover_servers(key, timeout=args.timeout, discovery_port=args.port))
     elif args.cmd == "db-check":
         print_json(vault.db.integrity_check())
     elif args.cmd == "models":
