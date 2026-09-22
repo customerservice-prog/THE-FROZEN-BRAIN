@@ -10,6 +10,7 @@ from .core import ColdVault
 from .portability import export_memories, import_memories
 from .server import serve
 from .survival import select_survival_model
+from .survival_bundle import build_survival_bundle, verify_survival_bundle
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,6 +155,17 @@ def build_parser() -> argparse.ArgumentParser:
     survival.add_argument("--memory-gb", type=float)
     survival.add_argument("--path-only", action="store_true")
 
+    bundle = sub.add_parser("survival-bundle")
+    bundle.add_argument("output")
+    bundle.add_argument("--model-dir")
+    bundle.add_argument("--memory-gb", type=float)
+    bundle.add_argument("--include-model", action="store_true")
+    bundle.add_argument("--knowledge-query", action="append", default=[])
+    bundle.add_argument("--knowledge-limit", type=int, default=120)
+
+    bundle_verify = sub.add_parser("survival-verify")
+    bundle_verify.add_argument("path")
+
     server = sub.add_parser("serve")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=7777)
@@ -295,6 +307,19 @@ def main() -> None:
             print(selection.model_path)
         else:
             print_json(selection.as_dict())
+    elif args.cmd == "survival-bundle":
+        memory_bytes = None if args.memory_gb is None else int(args.memory_gb * (1024 ** 3))
+        print_json(build_survival_bundle(
+            vault,
+            Path(args.output),
+            model_dir=Path(args.model_dir) if args.model_dir else None,
+            memory_bytes=memory_bytes,
+            include_model=args.include_model,
+            knowledge_queries=args.knowledge_query,
+            knowledge_limit=args.knowledge_limit,
+        ))
+    elif args.cmd == "survival-verify":
+        print_json(verify_survival_bundle(Path(args.path)))
     elif args.cmd == "serve":
         serve(vault, args.host, args.port)
 
