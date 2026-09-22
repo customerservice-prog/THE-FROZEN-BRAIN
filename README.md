@@ -14,8 +14,7 @@ The initial foundation includes:
 - Explicit long-term memory with kind, source, confidence, and tags
 - Structured belief/evidence tracking that preserves hypotheses, assumptions, support, and contradictions
 - Persistent cognitive state for active project, objective, hypotheses, uncertainty, next action, and related state
-- SHA-256 cognitive checkpoints that restore after restart
-- Local document ingestion for text, HTML, DOCX, and offline PDF extraction when archived support is present\n- Hybrid lexical + optional local semantic retrieval through a local embedding model\n- A provider adapter for a **local** OpenAI-compatible model server
+- SHA-256 cognitive checkpoints that restore after restart\n- Prospective memory for future commitments with due-time persistence\n- Crash journal replay for cognitive changes made after the last checkpoint\n- Persistent tool jobs that recover interrupted work and support explicit retry\n- Local document ingestion for text, HTML, DOCX, and offline PDF extraction when archived support is present\n- Hybrid lexical + optional local semantic retrieval through a local embedding model\n- A provider adapter for a **local** OpenAI-compatible model server
 - Multi-model capability routing and Deep Think deliberation with independent solvers + critic synthesis
 - Permission-scoped workspace tools with path-escape protection
 - CLI
