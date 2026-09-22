@@ -26,3 +26,5 @@ jobs:
         env:
           COLDVAULT_HOME: ${{ runner.temp }}/coldvault
         run: python scripts/smoke_test.py
+      - name: Offline resurrection test
+        run: python scripts/resurrection_test.py
