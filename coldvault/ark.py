@@ -158,7 +158,7 @@ def build_ark_catalog(
         f"Generated: {manifest['created_at']}",
         f"Files: {len(files)}",
         f"Total size: {_format_bytes(total_bytes)}",
-        f"Manifest: \`{manifest_path.name}\`",
+        f"Manifest: `{manifest_path.name}`",
         "",
         "## Completeness",
         "",
@@ -182,7 +182,7 @@ def build_ark_catalog(
         "",
         "## Recovery order",
         "",
-        "1. Verify \`COLDVAULT-ARK.json\` against every listed SHA-256.",
+        "1. Verify `COLDVAULT-ARK.json` against every listed SHA-256.",
         "2. Restore operating-system media, drivers, firmware, and runtime dependencies.",
         "3. Restore ColdVault source and its package archive.",
         "4. Restore model weights and inference runtimes.",
@@ -197,11 +197,11 @@ def build_ark_catalog(
     ]
     for entry in files:
         lines.append(
-            f"| {entry['category']} | \`{entry['path']}\` | {_format_bytes(entry['bytes'])} | \`{entry['sha256']}\` |"
+            f"| {entry['category']} | `{entry['path']}` | {_format_bytes(entry['bytes'])} | `{entry['sha256']}` |"
         )
     index_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
-    tmp_index.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    tmp_index.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp_index.replace(index_path)
     return manifest
 
