@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "frontier": {"purpose": "maximum reasoning", "provider": "openai-compatible-local"},
+    "coding": {"purpose": "software engineering", "provider": "openai-compatible-local"},
+    "fast": {"purpose": "low latency general use", "provider": "openai-compatible-local"},
+    "mobile": {"purpose": "constrained hardware fallback", "provider": "on-device"}
+  },
+  "note": "Model weights are deliberately not stored in Git. ColdVault archives them separately with hashes and manifests."
+}
