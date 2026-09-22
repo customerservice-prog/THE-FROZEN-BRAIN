@@ -108,6 +108,53 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
+MODEL_CONFIG="$COLDVAULT_HOME/mobile-models.json"
+LAN_URL=""
+
+if { [ -n "${COLDVAULT_DISCOVERY_KEY:-}" ] || [ -n "${COLDVAULT_DISCOVERY_KEY_FILE:-}" ]; } && [ -n "${COLDVAULT_ACCESS_TOKEN:-}" ]; then
+  DISCOVERY_JSON="$("$PYTHON_BIN" -m coldvault.cli discover --timeout "${COLDVAULT_DISCOVERY_TIMEOUT:-3}" 2>/dev/null || printf '[]')"
+  LAN_URL="$(printf '%s' "$DISCOVERY_JSON" | "$PYTHON_BIN" -c 'import json,sys; x=json.load(sys.stdin); print((x[0].get("url") if x else "") or "")' 2>/dev/null || true)"
+fi
+
+if [ -n "$LAN_URL" ]; then
+  "$PYTHON_BIN" - "$MODEL_CONFIG" "$LAN_URL" "$LLAMA_PORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+lan = sys.argv[2].rstrip("/")
+local_port = int(sys.argv[3])
+payload = {
+    "profiles": {
+        "lan-brain": {
+            "purpose": "strong offline LAN brain",
+            "model": "coldvault-lan",
+            "base_url": lan + "/v1",
+            "capabilities": ["general", "reasoning", "coding", "vision"],
+            "priority": 100,
+            "enabled": True,
+        },
+        "phone-local": {
+            "purpose": "on-device survival fallback",
+            "model": "frozen-brain-mobile",
+            "base_url": f"http://127.0.0.1:{local_port}/v1",
+            "capabilities": ["general", "reasoning", "coding"],
+            "priority": 10,
+            "enabled": True,
+        },
+    }
+}
+path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+PY
+  export COLDVAULT_MODELS="$MODEL_CONFIG"
+  export COLDVAULT_API_KEY="$COLDVAULT_ACCESS_TOKEN"
+  echo "LAN brain discovered: $LAN_URL"
+  echo "Failover: LAN brain -> phone-local GGUF"
+else
+  echo "No authenticated LAN brain discovered; using phone-local GGUF only."
+fi
+
 "$PYTHON_BIN" -m coldvault.cli checkpoint --reason "android-survival-start" >/dev/null 2>&1 || true
 "$PYTHON_BIN" -m coldvault.cli serve --host 127.0.0.1 --port "$UI_PORT" &
 CORE_PID=$!
