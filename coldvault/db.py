@@ -11,6 +11,7 @@ from typing import Iterator
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
+PRAGMA synchronous=NORMAL;
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,6 +19,8 @@ CREATE TABLE IF NOT EXISTS events (
     kind TEXT NOT NULL,
     payload_json TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_events_kind_id ON events(kind, id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,6 +31,8 @@ CREATE TABLE IF NOT EXISTS memories (
     confidence REAL NOT NULL DEFAULT 1.0,
     tags_json TEXT NOT NULL DEFAULT '[]'
 );
+
+CREATE INDEX IF NOT EXISTS idx_memories_kind_id ON memories(kind, id);
 
 CREATE TABLE IF NOT EXISTS checkpoints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +51,8 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     UNIQUE(source_path, chunk_index, source_sha256)
 );
 
+CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge_chunks(source_path);
+
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -53,6 +60,38 @@ CREATE TABLE IF NOT EXISTS projects (
     state_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'todo',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    ts TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
 """
 
 
@@ -72,6 +111,7 @@ class Database:
         con = sqlite3.connect(self.path, timeout=30)
         con.row_factory = sqlite3.Row
         try:
+            con.execute("PRAGMA foreign_keys=ON")
             yield con
             con.commit()
         except Exception:
@@ -91,9 +131,15 @@ class Database:
     def recent_events(self, limit: int = 50) -> list[dict]:
         with self.connect() as con:
             rows = con.execute(
-                "SELECT id, ts, kind, payload_json FROM events ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT id, ts, kind, payload_json FROM events ORDER BY id DESC LIMIT ?", (max(1, min(limit, 1000)),)
             ).fetchall()
         return [
             {"id": r["id"], "ts": r["ts"], "kind": r["kind"], "payload": json.loads(r["payload_json"])}
             for r in reversed(rows)
         ]
+
+    def integrity_check(self) -> dict:
+        with self.connect() as con:
+            result = con.execute("PRAGMA integrity_check").fetchone()[0]
+            foreign = con.execute("PRAGMA foreign_key_check").fetchall()
+        return {"ok": result == "ok" and not foreign, "integrity": result, "foreign_key_violations": [tuple(x) for x in foreign]}
