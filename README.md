@@ -12,10 +12,12 @@ The initial foundation includes:
 
 - SQLite WAL event journal
 - Explicit long-term memory with kind, source, confidence, and tags
+- Structured belief/evidence tracking that preserves hypotheses, assumptions, support, and contradictions
 - Persistent cognitive state for active project, objective, hypotheses, uncertainty, next action, and related state
 - SHA-256 cognitive checkpoints that restore after restart
 - Local text knowledge ingestion and retrieval
 - A provider adapter for a **local** OpenAI-compatible model server
+- Multi-model capability routing and Deep Think deliberation with independent solvers + critic synthesis
 - Permission-scoped workspace tools with path-escape protection
 - CLI
 - Local browser UI at port `7777`
