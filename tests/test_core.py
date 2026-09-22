@@ -1,12 +1,53 @@
 from __future__ import annotations
 
+import json
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from coldvault.config import ModelConfig, Paths
 from coldvault.core import ColdVault
 from coldvault.tools import ToolPolicy, WorkspaceTools
+
+
+class _FakeModelHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        if self.path.endswith("/models"):
+            body = json.dumps({"data": [{"id": "test"}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_error(404)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if payload.get("stream"):
+            body = (
+                b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+                b'data: [DONE]\n\n'
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+            return
+        body = json.dumps({"choices": [{"message": {"content": "Hello"}}]}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 class ColdVaultTests(unittest.TestCase):
@@ -77,6 +118,46 @@ class ColdVaultTests(unittest.TestCase):
             prompt_summary = vault.beliefs.summary_for_prompt("fuel pump")
             self.assertIn("hypothesis", prompt_summary)
             self.assertIn("contradiction=1", prompt_summary)
+
+
+    def test_streaming_chat_is_durable(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                paths = Paths(root, root / "db.sqlite3", root / "knowledge", root / "checkpoints", root / "workspace", root / "logs").ensure()
+                model = ModelConfig(name="test", base_url=f"http://127.0.0.1:{server.server_port}/v1", timeout_seconds=2)
+                vault = ColdVault(paths=paths, model=model)
+                events = list(vault.chat_stream("hello", conversation_id="stream-test"))
+                self.assertEqual([e["text"] for e in events if e["type"] == "delta"], ["Hel", "lo"])
+                done = [e for e in events if e["type"] == "done"][0]
+                self.assertTrue(done["ok"])
+                self.assertEqual(done["answer"], "Hello")
+                history = vault.conversations.history("stream-test")
+                self.assertEqual([x["role"] for x in history], ["user", "assistant"])
+                self.assertEqual(history[-1]["content"], "Hello")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_belief_state_is_in_reasoning_prompt(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = self.make_vault(Path(td))
+            vault.beliefs.create(
+                "Fuel delivery may be restricted",
+                classification="hypothesis",
+                confidence=0.6,
+                source="diagnostic-session",
+            )
+            conversation_id = vault.conversations.ensure("belief-prompt")
+            messages, _ = vault.build_messages("fuel delivery", conversation_id, "reasoning", "default")
+            system = messages[0]["content"]
+            self.assertIn("CURRENT BELIEF / EVIDENCE STATE", system)
+            self.assertIn("Fuel delivery may be restricted", system)
+            self.assertIn("Never silently promote a hypothesis", system)
 
 
 if __name__ == "__main__":
