@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
+from coldvault.ark import build_ark_catalog, verify_ark
 from coldvault.config import EmbeddingConfig, ModelConfig, Paths
 from coldvault.core import ColdVault
 from coldvault.embeddings import LocalEmbeddingProvider
@@ -385,6 +386,49 @@ class ColdVaultTests(unittest.TestCase):
             self.assertEqual(retried["job"]["status"], "succeeded")
             self.assertEqual(retried["job"]["parent_job_id"], interrupted_id)
             self.assertEqual(retried["job"]["attempt"], 2)
+
+
+    def test_ark_catalog_detects_corruption_and_completeness(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            payloads = {
+                "source/core.py": b"print('coldvault')\n",
+                "models/brain.gguf": b"MODEL",
+                "runtimes/llama-server": b"RUNTIME",
+                "packages/base.whl": b"PACKAGE",
+                "state/coldvault.sqlite3": b"STATE",
+                "knowledge/manual.txt": b"KNOWLEDGE",
+                "recovery/RESTORE.md": b"RECOVERY",
+                "os-media/linux.iso": b"OS",
+                "drivers/gpu.bin": b"DRIVER",
+                "firmware/board.bin": b"FIRMWARE",
+                "hardware-docs/server.md": b"HARDWARE",
+            }
+            for relative, data in payloads.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+
+            manifest = build_ark_catalog(root)
+            self.assertTrue(manifest["summary"]["complete"])
+            self.assertEqual(manifest["summary"]["missing_critical"], [])
+            self.assertEqual(manifest["summary"]["missing_recommended"], [])
+            self.assertEqual(
+                next(x for x in manifest["files"] if x["path"] == "runtimes/llama-server")["category"],
+                "runtimes",
+            )
+            self.assertEqual(
+                next(x for x in manifest["files"] if x["path"] == "firmware/board.bin")["category"],
+                "firmware",
+            )
+            verified = verify_ark(root, manifest, strict=True)
+            self.assertTrue(verified["ok"])
+            self.assertTrue(verified["archive_complete"])
+
+            (root / "models/brain.gguf").write_bytes(b"CORRUPTED")
+            broken = verify_ark(root, manifest, strict=True)
+            self.assertFalse(broken["ok"])
+            self.assertTrue(any(item["path"] == "models/brain.gguf" for item in broken["failures"]))
 
 
 if __name__ == "__main__":
