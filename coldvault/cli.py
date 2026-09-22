@@ -68,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     mem_import = sub.add_parser("memory-import")
     mem_import.add_argument("path")
 
+    sub.add_parser("knowledge-reindex")
+
     ingest = sub.add_parser("ingest")
     ingest.add_argument("path")
     ingest.add_argument("--logical-path")
@@ -163,6 +165,8 @@ def main() -> None:
         print_json(import_memories(vault.memory, Path(args.path)))
     elif args.cmd == "ingest":
         print_json(vault.knowledge.ingest_file(Path(args.path), args.logical_path))
+    elif args.cmd == "knowledge-reindex":
+        print_json(vault.knowledge.reindex_embeddings())
     elif args.cmd == "checkpoint":
         print_json(vault.checkpoint(args.reason))
     elif args.cmd == "state":
