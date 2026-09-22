@@ -4,11 +4,14 @@ import json
 import tempfile
 import threading
 import unittest
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
-from coldvault.config import ModelConfig, Paths
+from coldvault.config import EmbeddingConfig, ModelConfig, Paths
 from coldvault.core import ColdVault
+from coldvault.embeddings import LocalEmbeddingProvider
 from coldvault.tools import ToolPolicy, WorkspaceTools
 
 
@@ -30,6 +33,25 @@ class _FakeModelHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if self.path.endswith("/embeddings"):
+            inputs = payload.get("input", [])
+            data = []
+            for index, text in enumerate(inputs):
+                lower = str(text).lower()
+                if any(word in lower for word in ("car", "vehicle", "automobile")):
+                    vector = [1.0, 0.0, 0.0]
+                elif "generator" in lower:
+                    vector = [0.0, 1.0, 0.0]
+                else:
+                    vector = [0.0, 0.0, 1.0]
+                data.append({"index": index, "embedding": vector})
+            body = json.dumps({"data": data}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if payload.get("stream"):
             body = (
                 b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'
@@ -158,6 +180,58 @@ class ColdVaultTests(unittest.TestCase):
             self.assertIn("CURRENT BELIEF / EVIDENCE STATE", system)
             self.assertIn("Fuel delivery may be restricted", system)
             self.assertIn("Never silently promote a hypothesis", system)
+
+
+    def test_docx_document_ingestion(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = self.make_vault(root)
+            docx = root / "manual.docx"
+            document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Emergency generator reset procedure</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Disconnect the load before restarting.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"""
+            with zipfile.ZipFile(docx, "w") as archive:
+                archive.writestr("word/document.xml", document_xml)
+            result = vault.knowledge.ingest_file(docx, "manuals/generator.docx")
+            self.assertEqual(result["extractor"], "stdlib-docx")
+            found = vault.knowledge.search("generator restart")
+            self.assertTrue(found)
+            self.assertEqual(found[0]["source"], "manuals/generator.docx")
+
+    def test_local_embedding_provider_and_hybrid_retrieval(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                vault = self.make_vault(root)
+                config = EmbeddingConfig(
+                    name="fake-embed",
+                    base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                    timeout_seconds=2,
+                )
+                vault.knowledge.embedder = LocalEmbeddingProvider(config)
+                cars = root / "cars.txt"
+                generators = root / "generators.txt"
+                cars.write_text("A compact car needs tire pressure checks and regular maintenance.", encoding="utf-8")
+                generators.write_text("Generator fuel systems require clean filters.", encoding="utf-8")
+                cars_result = vault.knowledge.ingest_file(cars, "cars.txt")
+                vault.knowledge.ingest_file(generators, "generators.txt")
+                self.assertEqual(cars_result["embedding"]["embedded"], 1)
+                found = vault.knowledge.search("vehicle maintenance")
+                self.assertTrue(found)
+                self.assertEqual(found[0]["source"], "cars.txt")
+                self.assertEqual(found[0]["retrieval"], "hybrid")
+                self.assertGreater(found[0]["semantic_score"], 0.9)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":
