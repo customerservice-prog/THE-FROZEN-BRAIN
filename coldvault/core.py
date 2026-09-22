@@ -8,6 +8,7 @@ from .config import ModelConfig, Paths, load_identity
 from .continuity import ContinuityEngine
 from .conversations import ConversationStore
 from .db import Database
+from .hardware import detect_hardware
 from .knowledge import KnowledgeStore
 from .memory import MemoryStore
 from .model_registry import ModelRegistry
@@ -48,6 +49,7 @@ class ColdVault:
             "name": self.identity.get("name", "ColdVault"),
             "version": 2,
             "home": str(self.paths.home),
+            "hardware": detect_hardware().as_dict(),
             "selected_profile": profile.name,
             "model": profile.model,
             "provider": provider.health(),
