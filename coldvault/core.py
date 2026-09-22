@@ -18,7 +18,9 @@ from .model_registry import ModelRegistry
 from .projects import ProjectStore
 from .providers import OpenAICompatibleProvider, ProviderError
 from .router import classify_request, model_hint
+from .speech import LocalSpeechProvider, SpeechSettings
 from .tool_protocol import ToolRegistry, permission_from_env
+from .vision import LocalVisionProvider
 
 
 class ColdVault:
@@ -36,6 +38,7 @@ class ColdVault:
         self.conversations = ConversationStore(self.db)
         self.projects = ProjectStore(self.db)
         self.identity = load_identity(self.repo_root)
+        self.speech = LocalSpeechProvider(SpeechSettings.from_env())
         self.models = ModelRegistry(self.repo_root, self.model_config)
         self.tools = ToolRegistry(
             self.paths.workspace,
@@ -61,6 +64,7 @@ class ColdVault:
             "provider": provider.health(),
             "model_profiles": self.models.summary(),
             "embedding_model": self.knowledge.embedding_model,
+            "speech": self.speech.status(),
             "tools": self.tools.list(),
             "database": self.db.integrity_check(),
             "cognitive_state": self.continuity.snapshot(),
@@ -250,6 +254,66 @@ Rules:
             "attempts": result.attempts,
             "critique": result.critique,
             "synthesis_profile": result.synthesis_profile,
+            "sources": sources,
+        }
+
+    def transcribe(self, audio_path: Path) -> dict:
+        audio_path = Path(audio_path)
+        text = self.speech.transcribe(audio_path)
+        self.db.add_event("speech.transcribed", {"path": str(audio_path), "characters": len(text)})
+        return {"text": text, "path": str(audio_path)}
+
+    def speak(self, text: str, output_path: Path) -> dict:
+        result = self.speech.synthesize(text, Path(output_path))
+        self.db.add_event("speech.synthesized", {"path": result["path"], "bytes": result["bytes"], "format": result["format"]})
+        return result
+
+    def analyze_image(self, image_path: Path, prompt: str, conversation_id: str = "default") -> dict:
+        import hashlib
+
+        image_path = Path(image_path)
+        raw = image_path.read_bytes()
+        image_sha256 = hashlib.sha256(raw).hexdigest()
+        text = prompt.strip() or "Describe and analyze this image."
+        conversation_id = self.conversations.ensure(conversation_id)
+        stored_user_text = f"{text}\n[local image: {image_path.name}; sha256={image_sha256}]"
+        self.conversations.append(conversation_id, "user", stored_user_text)
+        self.db.add_event(
+            "vision.user",
+            {"conversation_id": conversation_id, "path": str(image_path), "sha256": image_sha256, "prompt": text},
+        )
+
+        route = "vision"
+        profile, provider = self._provider_for_route(route)
+        messages, knowledge = self.build_messages(text, conversation_id, route, profile.name)
+        vision = LocalVisionProvider(profile.as_config())
+        messages[-1]["content"] = vision.image_content(image_path, text)
+        try:
+            answer = provider.chat(messages, temperature=0.2, max_tokens=1800)
+            ok = True
+        except ProviderError as exc:
+            answer = (
+                "The ColdVault vision request could not complete because the configured local multimodal model did not answer. "
+                f"Profile: {profile.name}; model: {profile.model}; endpoint: {profile.base_url}. Provider error: {exc}"
+            )
+            ok = False
+        metadata = json.dumps(
+            {"route": "vision", "profile": profile.name, "provider_ok": ok, "image_sha256": image_sha256},
+            sort_keys=True,
+        )
+        self.conversations.append(conversation_id, "assistant", answer, metadata)
+        self.db.add_event(
+            "vision.assistant",
+            {"conversation_id": conversation_id, "provider_ok": ok, "image_sha256": image_sha256, "profile": profile.name},
+        )
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+        return {
+            "ok": ok,
+            "answer": answer,
+            "conversation_id": conversation_id,
+            "profile": profile.name,
+            "model": profile.model,
+            "image_sha256": image_sha256,
             "sources": sources,
         }
 
