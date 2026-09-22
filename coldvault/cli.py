@@ -70,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("knowledge-reindex")
 
+    transcribe = sub.add_parser("transcribe")
+    transcribe.add_argument("path")
+
+    speak = sub.add_parser("speak")
+    speak.add_argument("text")
+    speak.add_argument("--output", default="coldvault-speech.wav")
+
+    vision = sub.add_parser("vision")
+    vision.add_argument("path")
+    vision.add_argument("prompt", nargs="*", default=[])
+    vision.add_argument("--session", default="default")
+
     ingest = sub.add_parser("ingest")
     ingest.add_argument("path")
     ingest.add_argument("--logical-path")
@@ -167,6 +179,13 @@ def main() -> None:
         print_json(vault.knowledge.ingest_file(Path(args.path), args.logical_path))
     elif args.cmd == "knowledge-reindex":
         print_json(vault.knowledge.reindex_embeddings())
+    elif args.cmd == "transcribe":
+        print_json(vault.transcribe(Path(args.path)))
+    elif args.cmd == "speak":
+        print_json(vault.speak(args.text, Path(args.output)))
+    elif args.cmd == "vision":
+        prompt = " ".join(args.prompt).strip() or "Describe and analyze this image."
+        print_json(vault.analyze_image(Path(args.path), prompt, conversation_id=args.session))
     elif args.cmd == "checkpoint":
         print_json(vault.checkpoint(args.reason))
     elif args.cmd == "state":
