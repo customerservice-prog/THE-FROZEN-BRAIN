@@ -16,7 +16,7 @@
 
 - [x] Multi-model registry and capability-aware router
 - [x] Separate capability profiles for general/reasoning/coding/vision routing
-- [ ] Streaming generation
+- [x] Streaming generation
 - [x] Conversation/session persistence
 - [x] Tool registry with explicit permission gates
 - [x] Isolated Python execution with timeout and workspace scope
