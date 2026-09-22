@@ -95,6 +95,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.vault.projects.tasks(project) if project else [])
         elif path == "/api/tools":
             self._json(self.vault.tools.list())
+        elif path == "/api/reminders":
+            self._json(self.vault.prospective.list("pending", limit=100))
         else:
             self._static(path)
 
@@ -121,6 +123,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/conversations":
                 conversation_id = self.vault.conversations.create(str(data.get("title", "New conversation")))
                 self._json({"ok": True, "conversation_id": conversation_id}, 201)
+            elif path == "/api/reminders":
+                reminder_id = self.vault.prospective.create(
+                    str(data.get("content", "")),
+                    str(data.get("due_at", "")),
+                    source=str(data.get("source", "user")),
+                )
+                self._json({"ok": True, "id": reminder_id}, 201)
+            elif path == "/api/reminder-status":
+                self.vault.prospective.set_status(
+                    str(data.get("id", "")),
+                    str(data.get("status", "")),
+                )
+                self._json({"ok": True})
             elif path == "/api/memory":
                 memory_id = self.vault.memory.remember(
                     str(data.get("content", "")),
