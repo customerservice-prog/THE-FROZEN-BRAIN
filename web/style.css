@@ -191,3 +191,11 @@ dd { margin: 5px 0 0; overflow-wrap: anywhere; font-size: .9rem; }
   .composer { grid-template-columns: 1fr; }
   .composer button { min-height: 44px; }
 }
+
+
+.composer-actions { display: flex; align-items: stretch; gap: 8px; }
+.composer-actions button { min-width: 92px; }
+
+@media (max-width: 760px) {
+  .composer-actions { display: grid; grid-template-columns: 1fr 1fr; }
+}
