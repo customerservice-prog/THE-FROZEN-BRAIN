@@ -49,5 +49,35 @@ class ColdVaultTests(unittest.TestCase):
             self.assertEqual(found[0]["source"], "guide.txt")
 
 
+    def test_belief_evidence_preserves_contradiction(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = self.make_vault(Path(td))
+            belief_id = vault.beliefs.create(
+                "Fuel pump has failed",
+                classification="hypothesis",
+                confidence=0.55,
+                source="diagnostic-session",
+            )
+            vault.beliefs.add_evidence(
+                belief_id,
+                "Measured fuel pressure is below specification",
+                kind="supports",
+                source="pressure-test",
+            )
+            vault.beliefs.add_evidence(
+                belief_id,
+                "Pump motor can still be heard",
+                kind="contradicts",
+                source="user-observation",
+            )
+            belief = vault.beliefs.get(belief_id)
+            self.assertEqual(belief.classification, "hypothesis")
+            self.assertEqual(len(belief.evidence), 2)
+            self.assertEqual({e["kind"] for e in belief.evidence}, {"supports", "contradicts"})
+            prompt_summary = vault.beliefs.summary_for_prompt("fuel pump")
+            self.assertIn("hypothesis", prompt_summary)
+            self.assertIn("contradiction=1", prompt_summary)
+
+
 if __name__ == "__main__":
     unittest.main()
