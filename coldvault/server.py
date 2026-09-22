@@ -26,6 +26,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _stream_chat_ndjson(self, message: str, conversation_id: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        try:
+            for event in self.vault.chat_stream(message, conversation_id=conversation_id):
+                line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
+                self.wfile.write(line)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            self.vault.db.add_event("http.stream_disconnected", {"conversation_id": conversation_id})
+
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length > 2_000_000:
@@ -93,6 +107,11 @@ class Handler(BaseHTTPRequestHandler):
                     str(data.get("message", "")),
                     conversation_id=str(data.get("conversation_id", "default")),
                 ))
+            elif path == "/api/chat/stream":
+                self._stream_chat_ndjson(
+                    str(data.get("message", "")),
+                    str(data.get("conversation_id", "default")),
+                )
             elif path == "/api/think":
                 self._json(self.vault.deep_think(
                     str(data.get("message", "")),
