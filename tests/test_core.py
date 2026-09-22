@@ -15,6 +15,7 @@ from coldvault.config import EmbeddingConfig, ModelConfig, Paths
 from coldvault.core import ColdVault
 from coldvault.embeddings import LocalEmbeddingProvider
 from coldvault.speech import LocalSpeechProvider, SpeechSettings
+from coldvault.survival import select_survival_model
 from coldvault.tools import ToolPolicy, WorkspaceTools
 
 
@@ -429,6 +430,29 @@ class ColdVaultTests(unittest.TestCase):
             broken = verify_ark(root, manifest, strict=True)
             self.assertFalse(broken["ok"])
             self.assertTrue(any(item["path"] == "models/brain.gguf" for item in broken["failures"]))
+
+
+    def test_survival_model_selector_respects_ram_budget(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            small = root / "small.gguf"
+            medium = root / "medium.gguf"
+            large = root / "large.gguf"
+            with small.open("wb") as handle:
+                handle.truncate(256 * 1024 * 1024)
+            with medium.open("wb") as handle:
+                handle.truncate(640 * 1024 * 1024)
+            with large.open("wb") as handle:
+                handle.truncate(1200 * 1024 * 1024)
+
+            selection = select_survival_model(root, memory_bytes=2 * 1024 ** 3)
+            self.assertEqual(Path(selection.model_path).name, "medium.gguf")
+            self.assertLessEqual(selection.model_bytes, selection.budget_bytes)
+            self.assertEqual(selection.context_tokens, 2048)
+
+            too_small = select_survival_model(root, memory_bytes=512 * 1024 ** 2)
+            self.assertIsNone(too_small.model_path)
+            self.assertIn("no GGUF fits", too_small.reason)
 
 
 if __name__ == "__main__":
