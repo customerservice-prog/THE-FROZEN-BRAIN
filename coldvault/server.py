@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hmac
 import json
+import os
 import signal
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,14 +10,32 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .core import ColdVault
+from .discovery import DiscoveryBeacon, load_discovery_key
 
 
 class Handler(BaseHTTPRequestHandler):
     vault: ColdVault
     web_root: Path
+    access_token: str | None = None
+    require_auth: bool = False
 
     def log_message(self, fmt: str, *args) -> None:
         self.vault.db.add_event("http.access", {"message": fmt % args})
+
+    def _authorized(self) -> bool:
+        if not self.require_auth:
+            return True
+        if not self.access_token:
+            return False
+        supplied = self.headers.get("Authorization", "")
+        expected = f"Bearer {self.access_token}"
+        return hmac.compare_digest(supplied, expected)
+
+    def _require_api_auth(self, path: str) -> bool:
+        if not path.startswith("/api/") or self._authorized():
+            return True
+        self._json({"ok": False, "error": "authorization required"}, 401)
+        return False
 
     def _json(self, data: dict | list, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -80,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+        if not self._require_api_auth(path):
+            return
         if path == "/api/status":
             self._json(self.vault.status())
         elif path == "/api/events":
@@ -105,6 +127,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if not self._require_api_auth(path):
+            return
         try:
             data = self._read_json()
             if path == "/api/chat":
@@ -188,7 +212,28 @@ class Handler(BaseHTTPRequestHandler):
 def serve(vault: ColdVault, host: str = "127.0.0.1", port: int = 7777) -> None:
     Handler.vault = vault
     Handler.web_root = vault.repo_root / "web"
+
+    loopback = host in {"127.0.0.1", "localhost", "::1"}
+    access_token = os.environ.get("COLDVAULT_ACCESS_TOKEN", "").strip()
+    if not loopback and not access_token:
+        raise ValueError(
+            "refusing non-loopback bind without COLDVAULT_ACCESS_TOKEN; "
+            "set a strong local token before exposing ColdVault on an offline LAN"
+        )
+    Handler.access_token = access_token or None
+    Handler.require_auth = not loopback
+
     server = ThreadingHTTPServer((host, port), Handler)
+    discovery_key = load_discovery_key()
+    beacon = None
+    if discovery_key and not loopback:
+        discovery_port = int(os.environ.get("COLDVAULT_DISCOVERY_PORT", "47821"))
+        beacon = DiscoveryBeacon(
+            discovery_key,
+            port,
+            instance=str(vault.identity.get("name", "ColdVault")),
+            discovery_port=discovery_port,
+        ).start()
 
     previous_sigterm = None
     if hasattr(signal, "SIGTERM"):
@@ -208,5 +253,7 @@ def serve(vault: ColdVault, host: str = "127.0.0.1", port: int = 7777) -> None:
     finally:
         vault.checkpoint("server-shutdown")
         server.server_close()
+        if beacon is not None:
+            beacon.stop()
         if previous_sigterm is not None:
             signal.signal(signal.SIGTERM, previous_sigterm)
