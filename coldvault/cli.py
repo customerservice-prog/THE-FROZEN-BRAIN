@@ -25,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("message", nargs="+")
     chat.add_argument("--session", default="default")
 
+    think = sub.add_parser("think")
+    think.add_argument("message", nargs="+")
+    think.add_argument("--session", default="default")
+    think.add_argument("--attempts", type=int, default=2, choices=[2, 3, 4])
+
     new_chat = sub.add_parser("new-conversation")
     new_chat.add_argument("--title", default="New conversation")
 
@@ -109,6 +114,8 @@ def main() -> None:
         print_json(vault.projects.list())
     elif args.cmd == "chat":
         print_json(vault.chat(" ".join(args.message), conversation_id=args.session))
+    elif args.cmd == "think":
+        print_json(vault.deep_think(" ".join(args.message), conversation_id=args.session, attempts=args.attempts))
     elif args.cmd == "new-conversation":
         print(vault.conversations.create(args.title))
     elif args.cmd == "remember":
