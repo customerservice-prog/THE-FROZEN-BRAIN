@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .checkpoint_auth import ALGORITHM, load_checkpoint_key, seal_checkpoint, verify_checkpoint_seal
 from .db import Database, utcnow
 
 
@@ -98,7 +99,11 @@ class ContinuityEngine:
         data["_event_cursor"] = event_cursor
         canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        envelope = {"version": 2, "checksum": digest, "state": data}
+        key = load_checkpoint_key()
+        auth = None
+        if key:
+            auth = {"algorithm": ALGORITHM, "tag": seal_checkpoint(canonical, key)}
+        envelope = {"version": 2, "checksum": digest, "state": data, "authentication": auth}
         path = self.checkpoint_dir / f"checkpoint-{data['checkpointed_at'].replace(':', '-')}.json"
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(envelope, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -109,6 +114,11 @@ class ContinuityEngine:
                 (data["checkpointed_at"], reason, canonical, digest),
             )
             checkpoint_id = int(cur.lastrowid)
+            if auth:
+                con.execute(
+                    "INSERT INTO checkpoint_seals(checkpoint_id, algorithm, tag) VALUES (?, ?, ?)",
+                    (checkpoint_id, auth["algorithm"], auth["tag"]),
+                )
         self.db.add_event(
             "checkpoint.created",
             {
@@ -123,12 +133,17 @@ class ContinuityEngine:
             "path": str(path),
             "checksum": digest,
             "event_cursor": event_cursor,
+            "authenticated": bool(auth),
+            "authentication_algorithm": auth["algorithm"] if auth else None,
         }
 
     def restore_latest(self) -> CognitiveState:
         with self.db.connect() as con:
             row = con.execute(
-                "SELECT state_json, checksum FROM checkpoints ORDER BY id DESC LIMIT 1"
+                """SELECT c.id, c.state_json, c.checksum, s.algorithm, s.tag
+                   FROM checkpoints c
+                   LEFT JOIN checkpoint_seals s ON s.checkpoint_id = c.id
+                   ORDER BY c.id DESC LIMIT 1"""
             ).fetchone()
         if not row:
             # No checkpoint yet: replay any modern continuity events from a
@@ -139,6 +154,15 @@ class ContinuityEngine:
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         if digest != row["checksum"]:
             raise RuntimeError("latest cognitive checkpoint failed checksum validation")
+
+        if row["tag"] is not None:
+            key = load_checkpoint_key()
+            if not key:
+                raise RuntimeError(
+                    "latest cognitive checkpoint is authenticated but no checkpoint key is available"
+                )
+            if row["algorithm"] != ALGORITHM or not verify_checkpoint_seal(canonical, row["tag"], key):
+                raise RuntimeError("latest cognitive checkpoint failed authentication validation")
 
         data = json.loads(canonical)
         cursor = int(data.get("_event_cursor", 0) or 0)
