@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>THE FROZEN BRAIN</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">COLDVAULT AI</p>
+        <h1>THE FROZEN BRAIN</h1>
+        <p class="subtitle">Private intelligence. Persistent state. No cloud required.</p>
+      </div>
+      <div class="status-stack">
+        <span id="offlineBadge" class="badge">LOCAL CORE</span>
+        <span id="modelBadge" class="badge muted">MODEL CHECKING…</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <aside class="panel status-panel">
+        <h2>Continuity</h2>
+        <dl>
+          <div><dt>Project</dt><dd id="project">—</dd></div>
+          <div><dt>Objective</dt><dd id="objective">—</dd></div>
+          <div><dt>Next action</dt><dd id="nextAction">—</dd></div>
+          <div><dt>Data home</dt><dd id="home">—</dd></div>
+        </dl>
+        <button id="checkpoint" type="button">Create checkpoint</button>
+        <p id="checkpointResult" class="micro" aria-live="polite"></p>
+      </aside>
+
+      <section class="panel chat-panel">
+        <div id="messages" class="messages" aria-live="polite">
+          <article class="message assistant">
+            <span class="role">ColdVault</span>
+            <p>The continuity core is awake. Connect a local OpenAI-compatible model endpoint to enable generation.</p>
+          </article>
+        </div>
+        <form id="chatForm" class="composer">
+          <label class="sr-only" for="message">Message ColdVault</label>
+          <textarea id="message" rows="3" placeholder="Talk to your local AI…" required></textarea>
+          <button id="send" type="submit">Send</button>
+        </form>
+      </section>
+    </section>
+
+    <section class="panel state-editor">
+      <div>
+        <p class="eyebrow">PERSISTENT MIND STATE</p>
+        <h2>Tell ColdVault what survives reboot</h2>
+      </div>
+      <form id="stateForm" class="state-form">
+        <label>Active project<input id="stateProject" placeholder="Example: Generator repair"></label>
+        <label>Objective<input id="stateObjective" placeholder="What are we trying to accomplish?"></label>
+        <label>Next action<input id="stateNext" placeholder="What should happen next?"></label>
+        <button type="submit">Save state</button>
+        <span id="stateResult" class="micro" aria-live="polite"></span>
+      </form>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
