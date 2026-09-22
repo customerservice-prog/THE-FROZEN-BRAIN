@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .core import ColdVault
 from .discovery import DiscoveryBeacon, load_discovery_key
+from .providers import ProviderError
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -32,7 +33,8 @@ class Handler(BaseHTTPRequestHandler):
         return hmac.compare_digest(supplied, expected)
 
     def _require_api_auth(self, path: str) -> bool:
-        if not path.startswith("/api/") or self._authorized():
+        protected = path.startswith("/api/") or path.startswith("/v1/")
+        if not protected or self._authorized():
             return True
         self._json({"ok": False, "error": "authorization required"}, 401)
         return False
@@ -71,6 +73,95 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return value
 
+    def _relay_candidates(self, requested_model: str | None):
+        candidates = self.vault._provider_candidates("general")
+        if requested_model:
+            exact = [
+                item for item in candidates
+                if item[0].model == requested_model or item[0].name == requested_model
+            ]
+            if exact:
+                return exact
+        return candidates
+
+    def _relay_chat(self, data: dict) -> None:
+        messages = data.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError("messages must be a non-empty list")
+        requested = str(data.get("model") or "").strip() or None
+        temperature = float(data.get("temperature", 0.4))
+        max_tokens = int(data.get("max_tokens", 1400))
+        failures = []
+        for profile, provider in self._relay_candidates(requested):
+            try:
+                answer = provider.chat(messages, temperature=temperature, max_tokens=max_tokens)
+                self.vault.db.add_event(
+                    "lan.relay.completed",
+                    {"profile": profile.name, "model": profile.model, "failures": failures},
+                )
+                self._json({
+                    "id": "coldvault-local",
+                    "object": "chat.completion",
+                    "model": profile.model,
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
+                })
+                return
+            except ProviderError as exc:
+                failures.append({"profile": profile.name, "error": str(exc)})
+        raise ProviderError("no local provider available for LAN relay: " + "; ".join(x["error"] for x in failures))
+
+    def _relay_stream(self, data: dict) -> None:
+        messages = data.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError("messages must be a non-empty list")
+        requested = str(data.get("model") or "").strip() or None
+        temperature = float(data.get("temperature", 0.4))
+        max_tokens = int(data.get("max_tokens", 1400))
+        failures = []
+        chosen = None
+        iterator = None
+        first = None
+        for profile, provider in self._relay_candidates(requested):
+            try:
+                candidate = provider.stream_chat(messages, temperature=temperature, max_tokens=max_tokens)
+                first = next(candidate)
+                chosen = profile
+                iterator = candidate
+                break
+            except (ProviderError, StopIteration) as exc:
+                failures.append({"profile": profile.name, "error": str(exc) or "stream ended without text"})
+        if chosen is None or iterator is None or first is None:
+            raise ProviderError("no local provider available for LAN relay: " + "; ".join(x["error"] for x in failures))
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+
+        def send_delta(text: str) -> None:
+            payload = json.dumps({
+                "id": "coldvault-local",
+                "object": "chat.completion.chunk",
+                "model": chosen.model,
+                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+            }, ensure_ascii=False)
+            self.wfile.write(("data: " + payload + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            send_delta(first)
+            for chunk in iterator:
+                send_delta(chunk)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            self.vault.db.add_event(
+                "lan.relay.completed",
+                {"profile": chosen.name, "model": chosen.model, "stream": True, "failures": failures},
+            )
+        except (BrokenPipeError, ConnectionResetError):
+            self.vault.db.add_event("lan.relay.disconnected", {"profile": chosen.name, "model": chosen.model})
+
     def _static(self, name: str) -> None:
         allow = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
         target = allow.get(name)
@@ -102,7 +193,21 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         if not self._require_api_auth(path):
             return
-        if path == "/api/status":
+        if path == "/v1/models":
+            self._json({
+                "object": "list",
+                "data": [
+                    {
+                        "id": profile.model,
+                        "object": "model",
+                        "owned_by": "coldvault-local",
+                        "profile": profile.name,
+                    }
+                    for profile in self.vault.models.profiles
+                    if profile.enabled
+                ],
+            })
+        elif path == "/api/status":
             self._json(self.vault.status())
         elif path == "/api/events":
             self._json(self.vault.db.recent_events(100))
@@ -131,7 +236,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             data = self._read_json()
-            if path == "/api/chat":
+            if path == "/v1/chat/completions":
+                if bool(data.get("stream", False)):
+                    self._relay_stream(data)
+                else:
+                    self._relay_chat(data)
+            elif path == "/api/chat":
                 self._json(self.vault.chat(
                     str(data.get("message", "")),
                     conversation_id=str(data.get("conversation_id", "default")),
