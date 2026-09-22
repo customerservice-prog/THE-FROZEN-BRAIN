@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 import zipfile
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -303,6 +304,34 @@ class ColdVaultTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+
+    def test_prospective_memory_survives_and_becomes_due(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = self.make_vault(root)
+            now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+            due_id = vault.prospective.create(
+                "Check the generator fuel after restart",
+                now - timedelta(minutes=5),
+                source="unit-test",
+            )
+            future_id = vault.prospective.create(
+                "Rotate the cold-storage drives",
+                now + timedelta(days=30),
+                source="unit-test",
+            )
+            due = vault.prospective.due(now)
+            self.assertEqual([item["id"] for item in due], [due_id])
+            summary = vault.prospective.summary_for_prompt(now)
+            self.assertIn("DUE", summary)
+            self.assertIn("generator fuel", summary)
+
+            restored = self.make_vault(root)
+            pending_ids = {item["id"] for item in restored.prospective.list("pending")}
+            self.assertEqual(pending_ids, {due_id, future_id})
+            restored.prospective.set_status(due_id, "done")
+            self.assertNotIn(due_id, {item["id"] for item in restored.prospective.list("pending")})
 
 
 if __name__ == "__main__":
