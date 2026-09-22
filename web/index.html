@@ -85,6 +85,23 @@
         <section class="panel compact">
           <div class="section-row">
             <div>
+              <p class="eyebrow">PROSPECTIVE MEMORY</p>
+              <h2>Future commitments</h2>
+            </div>
+            <span id="reminderCount" class="badge muted">0</span>
+          </div>
+          <div id="reminderList" class="task-list"></div>
+          <form id="reminderForm" class="stack-form">
+            <label>Remember<input id="reminderText" placeholder="What should survive until later?"></label>
+            <label>Due<input id="reminderDue" type="datetime-local"></label>
+            <button type="submit" class="secondary">Save future memory</button>
+          </form>
+          <p id="reminderResult" class="micro" aria-live="polite"></p>
+        </section>
+
+        <section class="panel compact">
+          <div class="section-row">
+            <div>
               <p class="eyebrow">PROJECT TASKS</p>
               <h2>Work queue</h2>
             </div>
