@@ -93,6 +93,12 @@ class Handler(BaseHTTPRequestHandler):
                     str(data.get("message", "")),
                     conversation_id=str(data.get("conversation_id", "default")),
                 ))
+            elif path == "/api/think":
+                self._json(self.vault.deep_think(
+                    str(data.get("message", "")),
+                    conversation_id=str(data.get("conversation_id", "default")),
+                    attempts=int(data.get("attempts", 2)),
+                ))
             elif path == "/api/conversations":
                 conversation_id = self.vault.conversations.create(str(data.get("title", "New conversation")))
                 self._json({"ok": True, "conversation_id": conversation_id}, 201)
