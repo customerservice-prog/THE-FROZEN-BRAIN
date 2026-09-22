@@ -45,10 +45,7 @@ class ModelRegistry:
         candidates = []
         if override:
             candidates.append(Path(override))
-        candidates.extend([
-            self.repo_root / "config" / "models.json",
-            self.repo_root / "config" / "models.example.json",
-        ])
+        candidates.append(self.repo_root / "config" / "models.json")
         data = None
         for path in candidates:
             if path.exists():
