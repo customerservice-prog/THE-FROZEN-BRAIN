@@ -21,17 +21,17 @@
 - [x] Tool registry with explicit permission gates
 - [x] Isolated Python execution with timeout and workspace scope
 - [x] Persistent projects and task work queue
-- [ ] Better lexical + optional embedding retrieval
+- [x] Better lexical + optional embedding retrieval
 - [x] Local knowledge source labels returned with answers
 - [x] JSONL import/export of durable memory
 
 ## Phase 2 — Perception and voice
 
-- [ ] Local speech-to-text adapter
-- [ ] Local text-to-speech adapter
-- [ ] Local multimodal/vision adapter
-- [ ] Image/document ingestion
-- [ ] Offline PDF extraction
+- [x] Local speech-to-text adapter
+- [x] Local text-to-speech adapter
+- [x] Local multimodal/vision adapter
+- [x] Text/HTML/DOCX document ingestion + local image analysis\n- [ ] Image knowledge ingestion / visual indexing
+- [x] Offline PDF extraction through archived pypdf or pdftotext
 - [ ] Audio/video indexing pipeline
 
 ## Phase 3 — Continuity and agents
