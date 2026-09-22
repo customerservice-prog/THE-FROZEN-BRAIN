@@ -41,7 +41,7 @@ def _budget_for_ram(memory_bytes: int | None) -> int | None:
         return None
     reserve = int(1.15 * 1024 ** 3)
     if memory_bytes <= reserve:
-        return max(256 * 1024 ** 2, int(memory_bytes * 0.28))
+        return max(64 * 1024 ** 2, int(memory_bytes * 0.28))
     gb = memory_bytes / (1024 ** 3)
     ratio = 0.38 if gb < 4 else 0.46 if gb < 8 else 0.54
     return max(256 * 1024 ** 2, min(int(memory_bytes * ratio), memory_bytes - reserve))
