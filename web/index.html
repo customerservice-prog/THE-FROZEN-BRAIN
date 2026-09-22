@@ -11,23 +11,34 @@
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">COLDVAULT AI</p>
+        <p class="eyebrow">COLDVAULT AI · SOVEREIGN LOCAL INTELLIGENCE</p>
         <h1>THE FROZEN BRAIN</h1>
-        <p class="subtitle">Private intelligence. Persistent state. No cloud required.</p>
+        <p class="subtitle">Brain replaceable. Memory durable. World local.</p>
       </div>
-      <div class="status-stack">
-        <span id="offlineBadge" class="badge">LOCAL CORE</span>
+      <div class="status-stack" aria-label="System status">
+        <span class="badge">LOCAL CORE</span>
         <span id="modelBadge" class="badge muted">MODEL CHECKING…</span>
+        <span id="dbBadge" class="badge muted">DB CHECKING…</span>
       </div>
     </header>
 
-    <section class="grid">
-      <aside class="panel status-panel">
-        <h2>Continuity</h2>
+    <section class="workspace">
+      <aside class="sidebar panel">
+        <div class="sidebar-head">
+          <div>
+            <p class="eyebrow">SESSIONS</p>
+            <h2>Conversations</h2>
+          </div>
+          <button id="newConversation" type="button" class="secondary">New</button>
+        </div>
+        <div id="conversationList" class="conversation-list" aria-live="polite"></div>
+
+        <div class="divider"></div>
+        <p class="eyebrow">CONTINUITY</p>
         <dl>
-          <div><dt>Project</dt><dd id="project">—</dd></div>
-          <div><dt>Objective</dt><dd id="objective">—</dd></div>
-          <div><dt>Next action</dt><dd id="nextAction">—</dd></div>
+          <div><dt>Project</dt><dd id="project">No active project</dd></div>
+          <div><dt>Objective</dt><dd id="objective">No objective saved</dd></div>
+          <div><dt>Next action</dt><dd id="nextAction">No next action saved</dd></div>
           <div><dt>Data home</dt><dd id="home">—</dd></div>
         </dl>
         <button id="checkpoint" type="button">Create checkpoint</button>
@@ -35,10 +46,17 @@
       </aside>
 
       <section class="panel chat-panel">
+        <div class="chat-head">
+          <div>
+            <p class="eyebrow">ACTIVE CONVERSATION</p>
+            <h2 id="conversationTitle">ColdVault</h2>
+          </div>
+          <span id="routeBadge" class="badge muted">AUTO ROUTE</span>
+        </div>
         <div id="messages" class="messages" aria-live="polite">
           <article class="message assistant">
             <span class="role">ColdVault</span>
-            <p>The continuity core is awake. Connect a local OpenAI-compatible model endpoint to enable generation.</p>
+            <p>The continuity core is awake. Connect a local model endpoint for generative answers; memory, checkpoints, projects, and local knowledge continue working without it.</p>
           </article>
         </div>
         <form id="chatForm" class="composer">
@@ -47,20 +65,43 @@
           <button id="send" type="submit">Send</button>
         </form>
       </section>
-    </section>
 
-    <section class="panel state-editor">
-      <div>
-        <p class="eyebrow">PERSISTENT MIND STATE</p>
-        <h2>Tell ColdVault what survives reboot</h2>
-      </div>
-      <form id="stateForm" class="state-form">
-        <label>Active project<input id="stateProject" placeholder="Example: Generator repair"></label>
-        <label>Objective<input id="stateObjective" placeholder="What are we trying to accomplish?"></label>
-        <label>Next action<input id="stateNext" placeholder="What should happen next?"></label>
-        <button type="submit">Save state</button>
-        <span id="stateResult" class="micro" aria-live="polite"></span>
-      </form>
+      <aside class="right-rail">
+        <section class="panel compact">
+          <p class="eyebrow">PERSISTENT MIND STATE</p>
+          <h2>Survive restart</h2>
+          <form id="stateForm" class="stack-form">
+            <label>Active project<input id="stateProject" placeholder="Generator repair"></label>
+            <label>Objective<input id="stateObjective" placeholder="What are we trying to accomplish?"></label>
+            <label>Next action<input id="stateNext" placeholder="What happens next?"></label>
+            <button type="submit">Save state</button>
+            <span id="stateResult" class="micro" aria-live="polite"></span>
+          </form>
+        </section>
+
+        <section class="panel compact">
+          <div class="section-row">
+            <div>
+              <p class="eyebrow">PROJECT TASKS</p>
+              <h2>Work queue</h2>
+            </div>
+            <span id="taskCount" class="badge muted">0</span>
+          </div>
+          <div id="taskList" class="task-list"></div>
+          <form id="taskForm" class="task-form">
+            <label class="sr-only" for="taskTitle">New task</label>
+            <input id="taskTitle" placeholder="Add a task">
+            <button type="submit" class="secondary">Add</button>
+          </form>
+          <p id="taskResult" class="micro" aria-live="polite"></p>
+        </section>
+
+        <section class="panel compact">
+          <p class="eyebrow">PERMISSIONS</p>
+          <h2>Local tools</h2>
+          <div id="toolList" class="tool-list"></div>
+        </section>
+      </aside>
     </section>
   </main>
   <script src="/app.js"></script>
