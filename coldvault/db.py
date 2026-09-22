@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS prospective_actions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prospective_status_due ON prospective_actions(status, due_at);
+
+CREATE TABLE IF NOT EXISTS tool_jobs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    tool_name TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    result_json TEXT,
+    error TEXT,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    parent_job_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_jobs_status_updated ON tool_jobs(status, updated_at DESC);
 """
 
 
