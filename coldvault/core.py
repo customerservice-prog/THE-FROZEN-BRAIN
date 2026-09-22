@@ -8,6 +8,7 @@ from .config import ModelConfig, Paths, load_identity
 from .continuity import ContinuityEngine
 from .conversations import ConversationStore
 from .db import Database
+from .deliberation import DeliberationEngine
 from .hardware import detect_hardware
 from .knowledge import KnowledgeStore
 from .memory import MemoryStore
@@ -139,6 +140,39 @@ Rules:
             "profile": profile.name,
             "model": profile.model,
             "conversation_id": conversation_id,
+            "sources": sources,
+        }
+
+    def deep_think(self, user_text: str, conversation_id: str = "default", attempts: int = 2) -> dict:
+        text = user_text.strip()
+        if not text:
+            raise ValueError("message cannot be empty")
+        conversation_id = self.conversations.ensure(conversation_id)
+        self.conversations.append(conversation_id, "user", text)
+        self.db.add_event("deliberation.started", {"conversation_id": conversation_id, "attempts": attempts})
+        profile = self.models.select("reasoning")
+        messages, knowledge = self.build_messages(text, conversation_id, "reasoning", profile.name)
+        engine = DeliberationEngine(self.models)
+        try:
+            result = engine.run(messages, attempts=attempts)
+        except (ProviderError, RuntimeError) as exc:
+            answer = f"Deep Think could not complete because the configured local reasoning models did not finish: {exc}"
+            self.conversations.append(conversation_id, "assistant", answer, json.dumps({"deep_think": True, "ok": False}))
+            self.db.add_event("deliberation.failed", {"conversation_id": conversation_id, "error": str(exc)})
+            return {"ok": False, "answer": answer, "conversation_id": conversation_id, "attempts": [], "sources": []}
+        self.conversations.append(
+            conversation_id, "assistant", result.final,
+            json.dumps({"deep_think": True, "attempts": len(result.attempts), "profile": result.synthesis_profile}, sort_keys=True),
+        )
+        self.db.add_event("deliberation.completed", {"conversation_id": conversation_id, "attempts": len(result.attempts)})
+        sources = [{"source": k["source"], "chunk_index": k["chunk_index"], "sha256": k["sha256"]} for k in knowledge]
+        return {
+            "ok": True,
+            "answer": result.final,
+            "conversation_id": conversation_id,
+            "attempts": result.attempts,
+            "critique": result.critique,
+            "synthesis_profile": result.synthesis_profile,
             "sources": sources,
         }
 
