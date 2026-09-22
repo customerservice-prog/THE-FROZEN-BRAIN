@@ -37,9 +37,9 @@
 ## Phase 3 — Continuity and agents
 
 - [x] Structured belief/evidence graph
-- [ ] Prospective memory scheduler
-- [ ] Crash journal replay
-- [ ] Resumable tool jobs
+- [x] Prospective memory scheduler
+- [x] Crash journal replay for post-checkpoint cognitive state
+- [x] Crash-aware tool jobs with interrupted-state recovery and manual retry
 - [x] Solver/critic/verifier orchestration
 - [x] Multi-agent deliberation with independent attempts
 - [ ] Automatic pre-shutdown checkpointing
