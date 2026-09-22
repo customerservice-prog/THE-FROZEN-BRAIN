@@ -13,6 +13,7 @@ from .deliberation import DeliberationEngine
 from .embeddings import LocalEmbeddingProvider
 from .hardware import detect_hardware
 from .knowledge import KnowledgeStore
+from .jobs import ToolJobStore
 from .memory import MemoryStore
 from .model_registry import ModelRegistry
 from .projects import ProjectStore
@@ -48,6 +49,7 @@ class ColdVault:
             self.knowledge,
             permission=permission_from_env(),
         )
+        self.jobs = ToolJobStore(self.db, self.tools)
 
     def _provider_for_route(self, route: str) -> tuple[object, OpenAICompatibleProvider]:
         profile = self.models.select(route)
@@ -68,6 +70,7 @@ class ColdVault:
             "embedding_model": self.knowledge.embedding_model,
             "speech": self.speech.status(),
             "tools": self.tools.list(),
+            "interrupted_jobs": self.jobs.list("interrupted", limit=20),
             "database": self.db.integrity_check(),
             "cognitive_state": self.continuity.snapshot(),
             "prospective_due": self.prospective.due(),
@@ -336,9 +339,17 @@ Rules:
     def run_tool(self, name: str, arguments: dict) -> dict:
         self.db.add_event("tool.requested", {"name": name, "arguments": arguments})
         try:
-            result = self.tools.run(name, arguments)
+            job = self.jobs.run(name, arguments)
         except Exception as exc:
             self.db.add_event("tool.failed", {"name": name, "error": repr(exc)})
             raise
-        self.db.add_event("tool.completed", {"name": name})
-        return {"ok": True, "tool": name, "result": result}
+        self.db.add_event("tool.completed", {"name": name, "job_id": job.id})
+        return {"ok": True, "tool": name, "job_id": job.id, "result": job.result}
+
+    def retry_tool_job(self, job_id: str) -> dict:
+        job = self.jobs.retry(job_id)
+        return {"ok": True, "job": job.as_dict()}
+
+    def cancel_tool_job(self, job_id: str) -> dict:
+        self.jobs.cancel(job_id)
+        return {"ok": True, "job_id": job_id, "status": "cancelled"}
