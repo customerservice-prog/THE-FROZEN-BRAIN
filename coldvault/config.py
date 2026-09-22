@@ -78,6 +78,46 @@ class ModelConfig:
         ).validate_privacy()
 
 
+
+@dataclass
+class EmbeddingConfig:
+    name: str = ""
+    base_url: str = "http://127.0.0.1:11434/v1"
+    api_key: str = "coldvault-local"
+    timeout_seconds: int = 60
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.name.strip())
+
+    def validate_privacy(self) -> "EmbeddingConfig":
+        if not self.enabled:
+            return self
+        if os.environ.get("COLDVAULT_ALLOW_REMOTE_PROVIDER", "").strip().lower() in {"1", "true", "yes"}:
+            return self
+        if not _endpoint_is_local(self.base_url):
+            raise ValueError(
+                f"refusing non-local embedding endpoint {self.base_url!r}; "
+                "set COLDVAULT_ALLOW_REMOTE_PROVIDER=1 only if remote inference is intentional"
+            )
+        return self
+
+    @classmethod
+    def from_env(cls) -> "EmbeddingConfig":
+        return cls(
+            name=os.environ.get("COLDVAULT_EMBEDDING_MODEL", "").strip(),
+            base_url=os.environ.get(
+                "COLDVAULT_EMBEDDING_BASE_URL",
+                os.environ.get("COLDVAULT_BASE_URL", "http://127.0.0.1:11434/v1"),
+            ).rstrip("/"),
+            api_key=os.environ.get(
+                "COLDVAULT_EMBEDDING_API_KEY",
+                os.environ.get("COLDVAULT_API_KEY", "coldvault-local"),
+            ),
+            timeout_seconds=int(os.environ.get("COLDVAULT_EMBEDDING_TIMEOUT", "60")),
+        ).validate_privacy()
+
+
 def load_identity(repo_root: Path | None = None) -> dict:
     override = os.environ.get("COLDVAULT_IDENTITY")
     candidates = []
