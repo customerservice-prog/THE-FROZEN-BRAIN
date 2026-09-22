@@ -12,6 +12,9 @@ license = {text = "MIT"}
 authors = [{name = "THE FROZEN BRAIN contributors"}]
 dependencies = []
 
+[project.optional-dependencies]
+documents = ["pypdf>=5,<7"]
+
 [project.scripts]
 coldvault = "coldvault.cli:main"
 
