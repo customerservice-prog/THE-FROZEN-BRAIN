@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from coldvault.config import EmbeddingConfig, ModelConfig, Paths
 from coldvault.core import ColdVault
 from coldvault.embeddings import LocalEmbeddingProvider
+from coldvault.speech import LocalSpeechProvider, SpeechSettings
 from coldvault.tools import ToolPolicy, WorkspaceTools
 
 
@@ -32,7 +33,27 @@ class _FakeModelHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        raw = self.rfile.read(length)
+
+        if self.path.endswith("/audio/transcriptions"):
+            body = json.dumps({"text": "offline transcript"}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path.endswith("/audio/speech"):
+            body = b"RIFF-COLDVAULT-FAKE-AUDIO"
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        payload = json.loads(raw.decode("utf-8"))
         if self.path.endswith("/embeddings"):
             inputs = payload.get("input", [])
             data = []
@@ -64,7 +85,10 @@ class _FakeModelHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             self.wfile.flush()
             return
-        body = json.dumps({"choices": [{"message": {"content": "Hello"}}]}).encode("utf-8")
+        messages = payload.get("messages", [])
+        is_vision = any(isinstance(message.get("content"), list) for message in messages if isinstance(message, dict))
+        answer = "vision-ok" if is_vision else "Hello"
+        body = json.dumps({"choices": [{"message": {"content": answer}}]}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -228,6 +252,53 @@ class ColdVaultTests(unittest.TestCase):
                 self.assertEqual(found[0]["source"], "cars.txt")
                 self.assertEqual(found[0]["retrieval"], "hybrid")
                 self.assertGreater(found[0]["semantic_score"], 0.9)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+    def test_local_speech_and_vision_adapters(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                paths = Paths(root, root / "db.sqlite3", root / "knowledge", root / "checkpoints", root / "workspace", root / "logs").ensure()
+                model = ModelConfig(
+                    name="test",
+                    base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                    timeout_seconds=2,
+                )
+                vault = ColdVault(paths=paths, model=model)
+                vault.speech = LocalSpeechProvider(
+                    SpeechSettings(stt=model, tts=model, voice="coldvault-test")
+                )
+
+                audio = root / "sample.wav"
+                audio.write_bytes(b"RIFF-FAKE-INPUT")
+                transcript = vault.transcribe(audio)
+                self.assertEqual(transcript["text"], "offline transcript")
+
+                spoken = root / "spoken.wav"
+                speech_result = vault.speak("ColdVault is awake.", spoken)
+                self.assertTrue(spoken.exists())
+                self.assertGreater(speech_result["bytes"], 0)
+                self.assertEqual(speech_result["voice"], "coldvault-test")
+
+                image = root / "panel.png"
+                image.write_bytes(b"\x89PNG\r\n\x1a\nFAKE")
+                vision = vault.analyze_image(
+                    image,
+                    "Inspect this control panel.",
+                    conversation_id="vision-test",
+                )
+                self.assertTrue(vision["ok"])
+                self.assertEqual(vision["answer"], "vision-ok")
+                self.assertEqual(len(vision["image_sha256"]), 64)
+                history = vault.conversations.history("vision-test")
+                self.assertEqual(history[-1]["content"], "vision-ok")
         finally:
             server.shutdown()
             server.server_close()
