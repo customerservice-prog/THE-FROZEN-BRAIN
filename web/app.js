@@ -101,6 +101,45 @@ function renderTools(tools) {
   }
 }
 
+async function loadReminders() {
+  const reminders = await api("/api/reminders");
+  setText("reminderCount", String(reminders.length));
+  const list = $("reminderList");
+  list.replaceChildren();
+  if (!reminders.length) {
+    const empty = document.createElement("p");
+    empty.className = "micro";
+    empty.textContent = "No pending future commitments.";
+    list.append(empty);
+    return;
+  }
+  const now = Date.now();
+  for (const reminder of reminders) {
+    const row = document.createElement("div");
+    row.className = "task";
+    const left = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = reminder.content;
+    const due = document.createElement("span");
+    const dueDate = new Date(reminder.due_at);
+    due.textContent = `${dueDate.getTime() <= now ? "DUE · " : ""}${dueDate.toLocaleString()}`;
+    left.append(title, due);
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "secondary";
+    done.textContent = "Done";
+    done.addEventListener("click", async () => {
+      await api("/api/reminder-status", {
+        method: "POST",
+        body: JSON.stringify({id: reminder.id, status: "done"}),
+      });
+      await loadReminders();
+    });
+    row.append(left, done);
+    list.append(row);
+  }
+}
+
 async function loadTasks(project) {
   activeProject = project || "";
   const list = $("taskList");
@@ -307,6 +346,33 @@ $("stateForm").addEventListener("submit", async (event) => {
   }
 });
 
+$("reminderForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const content = $("reminderText").value.trim();
+  const dueValue = $("reminderDue").value;
+  if (!content || !dueValue) {
+    setText("reminderResult", "Add both the future commitment and a due time.");
+    return;
+  }
+  const due = new Date(dueValue);
+  if (Number.isNaN(due.getTime())) {
+    setText("reminderResult", "That due time is invalid.");
+    return;
+  }
+  try {
+    await api("/api/reminders", {
+      method: "POST",
+      body: JSON.stringify({content, due_at: due.toISOString(), source: "ui"}),
+    });
+    $("reminderText").value = "";
+    $("reminderDue").value = "";
+    setText("reminderResult", "Future memory saved locally.");
+    await loadReminders();
+  } catch (err) {
+    setText("reminderResult", err.message);
+  }
+});
+
 $("taskForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const title = $("taskTitle").value.trim();
@@ -329,10 +395,14 @@ async function boot() {
   await refreshStatus();
   await loadConversations();
   await loadHistory();
+  await loadReminders();
 }
 
 boot().catch((err) => {
   addMessage("assistant", `Startup error: ${err.message}`);
 });
 
-setInterval(refreshStatus, 30000);
+setInterval(async () => {
+  await refreshStatus();
+  await loadReminders();
+}, 30000);
