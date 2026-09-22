@@ -16,6 +16,7 @@ from coldvault.core import ColdVault
 from coldvault.embeddings import LocalEmbeddingProvider
 from coldvault.speech import LocalSpeechProvider, SpeechSettings
 from coldvault.survival import select_survival_model
+from coldvault.survival_bundle import build_survival_bundle, verify_survival_bundle
 from coldvault.tools import ToolPolicy, WorkspaceTools
 
 
@@ -453,6 +454,89 @@ class ColdVaultTests(unittest.TestCase):
             too_small = select_survival_model(root, memory_bytes=512 * 1024 ** 2)
             self.assertIsNone(too_small.model_path)
             self.assertIn("no GGUF fits", too_small.reason)
+
+
+    def test_phone_survival_bundle_contains_open_state_and_verifies(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = self.make_vault(root / "vault")
+            vault.memory.remember(
+                "Generator spark was confirmed",
+                kind="episodic",
+                source="unit-test",
+                tags=["critical", "generator"],
+            )
+            belief_id = vault.beliefs.create(
+                "Fuel delivery may be restricted",
+                classification="hypothesis",
+                confidence=0.62,
+                source="unit-test",
+            )
+            vault.beliefs.add_evidence(
+                belief_id,
+                "Fuel flow is below specification",
+                kind="supports",
+                source="unit-test",
+            )
+            vault.prospective.create(
+                "Recheck generator fuel after restart",
+                datetime.now(timezone.utc) + timedelta(hours=2),
+                source="unit-test",
+            )
+            vault.set_state({
+                "active_project": "Generator recovery",
+                "objective": "Restore reliable emergency power",
+                "next_action": "Inspect fuel delivery",
+            })
+
+            manual = root / "generator-manual.txt"
+            manual.write_text(
+                "Emergency generator fuel delivery inspection: isolate load, inspect filter, verify fuel flow.",
+                encoding="utf-8",
+            )
+            vault.knowledge.ingest_file(manual, "manuals/generator.txt")
+
+            models = root / "models"
+            models.mkdir()
+            (models / "micro.gguf").write_bytes(b"M" * 1024)
+            (models / "survival.gguf").write_bytes(b"S" * 4096)
+
+            output = root / "phone-survival.zip"
+            result = build_survival_bundle(
+                vault,
+                output,
+                model_dir=models,
+                memory_bytes=2 * 1024 ** 3,
+                include_model=True,
+                knowledge_queries=["generator fuel"],
+                knowledge_limit=20,
+            )
+            self.assertTrue(result["ok"])
+            self.assertTrue(output.exists())
+            verified = verify_survival_bundle(output)
+            self.assertTrue(verified["ok"])
+            self.assertGreater(verified["files_checked"], 5)
+            self.assertTrue(verified["metadata"]["model_included"])
+
+            with zipfile.ZipFile(output, "r") as archive:
+                names = set(archive.namelist())
+                self.assertIn("COLDVAULT-SURVIVAL/MANIFEST.json", names)
+                self.assertIn("COLDVAULT-SURVIVAL/state/coldvault.sqlite3", names)
+                self.assertIn("COLDVAULT-SURVIVAL/state/latest-checkpoint.json", names)
+                self.assertIn("COLDVAULT-SURVIVAL/memory/memories.jsonl", names)
+                self.assertIn("COLDVAULT-SURVIVAL/memory/beliefs.jsonl", names)
+                self.assertIn("COLDVAULT-SURVIVAL/memory/reminders.jsonl", names)
+                self.assertIn("COLDVAULT-SURVIVAL/knowledge/critical-chunks.jsonl", names)
+                self.assertIn("COLDVAULT-SURVIVAL/model/survival.gguf", names)
+                state = json.loads(archive.read("COLDVAULT-SURVIVAL/cognitive-state.json"))
+                self.assertEqual(state["active_project"], "Generator recovery")
+                chunks = archive.read("COLDVAULT-SURVIVAL/knowledge/critical-chunks.jsonl").decode("utf-8")
+                self.assertIn("fuel delivery", chunks.lower())
+                memories = archive.read("COLDVAULT-SURVIVAL/memory/memories.jsonl").decode("utf-8")
+                self.assertIn("Generator spark was confirmed", memories)
+                beliefs = archive.read("COLDVAULT-SURVIVAL/memory/beliefs.jsonl").decode("utf-8")
+                self.assertIn("Fuel delivery may be restricted", beliefs)
+                self.assertIn("Fuel flow is below specification", beliefs)
 
 
 if __name__ == "__main__":
