@@ -9,6 +9,7 @@ from .ark import build_ark_catalog, verify_ark
 from .core import ColdVault
 from .portability import export_memories, import_memories
 from .server import serve
+from .survival import select_survival_model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("root")
     verify.add_argument("manifest")
 
+    survival = sub.add_parser("survival-select")
+    survival.add_argument("model_dir")
+    survival.add_argument("--memory-gb", type=float)
+    survival.add_argument("--path-only", action="store_true")
+
     server = sub.add_parser("serve")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=7777)
@@ -280,6 +286,15 @@ def main() -> None:
     elif args.cmd == "archive-verify":
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
         print_json(verify_manifest(Path(args.root), manifest))
+    elif args.cmd == "survival-select":
+        memory_bytes = None if args.memory_gb is None else int(args.memory_gb * (1024 ** 3))
+        selection = select_survival_model(Path(args.model_dir), memory_bytes=memory_bytes)
+        if args.path_only:
+            if not selection.model_path:
+                raise SystemExit(selection.reason)
+            print(selection.model_path)
+        else:
+            print_json(selection.as_dict())
     elif args.cmd == "serve":
         serve(vault, args.host, args.port)
 
