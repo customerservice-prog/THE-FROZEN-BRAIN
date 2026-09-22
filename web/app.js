@@ -17,6 +17,19 @@ function setText(id, value) {
   $(id).textContent = value ?? "";
 }
 
+function attachSources(article, sources = []) {
+  if (!sources.length || article.querySelector(".sources")) return;
+  const refs = document.createElement("div");
+  refs.className = "sources";
+  for (const source of sources) {
+    const chip = document.createElement("span");
+    chip.textContent = `${source.source}#${source.chunk_index}`;
+    chip.title = `SHA-256 ${source.sha256}`;
+    refs.append(chip);
+  }
+  article.append(refs);
+}
+
 function addMessage(role, text, sources = []) {
   const article = document.createElement("article");
   article.className = `message ${role}`;
@@ -26,19 +39,10 @@ function addMessage(role, text, sources = []) {
   const p = document.createElement("p");
   p.textContent = text;
   article.append(label, p);
-  if (sources.length) {
-    const refs = document.createElement("div");
-    refs.className = "sources";
-    for (const source of sources) {
-      const chip = document.createElement("span");
-      chip.textContent = `${source.source}#${source.chunk_index}`;
-      chip.title = `SHA-256 ${source.sha256}`;
-      refs.append(chip);
-    }
-    article.append(refs);
-  }
+  attachSources(article, sources);
   $("messages").append(article);
   $("messages").scrollTop = $("messages").scrollHeight;
+  return {article, p};
 }
 
 function renderHistory(history) {
@@ -168,6 +172,63 @@ async function refreshStatus() {
   }
 }
 
+async function streamChat(message) {
+  const target = addMessage("assistant", "");
+  const response = await fetch("/api/chat/stream", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({message, conversation_id: currentConversation}),
+  });
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const error = await response.json();
+      detail = error.error || detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  if (!response.body) throw new Error("Streaming response body unavailable");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalEvent = null;
+
+  const processLine = (line) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === "meta") {
+      setText("routeBadge", `${String(event.route).toUpperCase()} · ${event.profile} · STREAMING`);
+    } else if (event.type === "delta") {
+      target.p.textContent += event.text || "";
+      $("messages").scrollTop = $("messages").scrollHeight;
+    } else if (event.type === "error") {
+      target.p.textContent = event.text || "Local model stream failed.";
+    } else if (event.type === "done") {
+      finalEvent = event;
+      if (!target.p.textContent) target.p.textContent = event.answer || "";
+      attachSources(target.article, event.sources || []);
+      setText("routeBadge", `${String(event.route).toUpperCase()} · ${event.profile}`);
+    }
+  };
+
+  while (true) {
+    const {value, done} = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), {stream: !done});
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      processLine(line);
+    }
+    if (done) break;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) processLine(buffer);
+  if (!finalEvent) throw new Error("Local model stream ended without a completion event");
+  return finalEvent;
+}
+
 async function sendMessage(deep = false) {
   const input = $("message");
   const text = input.value.trim();
@@ -178,15 +239,16 @@ async function sendMessage(deep = false) {
   $("deepThink").disabled = true;
   if (deep) setText("routeBadge", "DEEP THINK RUNNING");
   try {
-    const result = await api(deep ? "/api/think" : "/api/chat", {
-      method: "POST",
-      body: JSON.stringify({message: text, conversation_id: currentConversation, attempts: 2}),
-    });
-    addMessage("assistant", result.answer, result.sources || []);
+    let result;
     if (deep) {
+      result = await api("/api/think", {
+        method: "POST",
+        body: JSON.stringify({message: text, conversation_id: currentConversation, attempts: 2}),
+      });
+      addMessage("assistant", result.answer, result.sources || []);
       setText("routeBadge", `DEEP THINK · ${result.attempts?.length || 0} SOLVERS · ${result.synthesis_profile || "local"}`);
     } else {
-      setText("routeBadge", `${result.route.toUpperCase()} · ${result.profile}`);
+      result = await streamChat(text);
     }
     await loadConversations();
   } catch (err) {
