@@ -33,19 +33,27 @@ def _category(path: Path) -> str:
     suffix = path.suffix.lower()
     name = path.name.lower()
 
-    if suffix in {".gguf", ".safetensors", ".onnx", ".pt", ".pth", ".bin"} or "models" in parts:
-        return "models"
+    # Explicit archive directories outrank generic file extensions. A firmware
+    # blob named update.bin must never be mislabeled as a model weight.
     if any(part in {"runtimes", "runtime", "engines", "inference"} for part in parts):
         return "runtimes"
-    if suffix in {".whl", ".deb", ".rpm", ".apk", ".msi", ".pkg"} or any(
-        part in {"packages", "wheels", "package-cache"} for part in parts
-    ):
+    if any(part in {"packages", "wheels", "package-cache"} for part in parts):
         return "packages"
-    if suffix in {".iso", ".img"} or any(part in {"os", "os-media", "installers"} for part in parts):
+    if any(part in {"os", "os-media", "installers"} for part in parts):
         return "os_media"
     if "drivers" in parts:
         return "drivers"
-    if "firmware" in parts or suffix in {".rom", ".fw"}:
+    if "firmware" in parts:
+        return "firmware"
+    if "models" in parts:
+        return "models"
+    if suffix in {".gguf", ".safetensors", ".onnx", ".pt", ".pth"}:
+        return "models"
+    if suffix in {".whl", ".deb", ".rpm", ".apk", ".msi", ".pkg"}:
+        return "packages"
+    if suffix in {".iso", ".img"}:
+        return "os_media"
+    if suffix in {".rom", ".fw"}:
         return "firmware"
     if any(part in {"hardware-docs", "hardware_docs"} for part in parts):
         return "hardware_docs"
