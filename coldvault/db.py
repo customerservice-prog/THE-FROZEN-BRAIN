@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS belief_evidence (
 );
 
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_belief ON belief_evidence(belief_id, id);
+
+CREATE TABLE IF NOT EXISTS prospective_actions (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_prospective_status_due ON prospective_actions(status, due_at);
 """
 
 
